@@ -89,7 +89,7 @@ function strip_and_process_data(sheets_data::Dict{String, DataFrame})
         df."NO3-" = df."NO3- (mmol/L)"
         df."SO4-2" = df."SO42- (mmol/L)"
         df."NO2-" = df."NO2-(micromol/L)"
-        df = select(df, "Sample","t", "h", "Fe", "S-2", "NO3-","NO2-", "SO4-2")
+        df = select(df, "Sample","t", "h", "Fe", "S-2", "NO3-","NO2-", "SO4-2", "pH", "EC")
         CSV.write(joinpath(output_dir, "processed_data_$sheet_name.csv"), df)
         processed_data[sheet_name] = df
     end

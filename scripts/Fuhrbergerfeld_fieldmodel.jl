@@ -83,7 +83,7 @@ params = (prob, ca_samp, hco3_samp, so4_samp)
 
 nlls_prob = NonlinearLeastSquaresProblem(residuals, p0, params)
 
-res = solve(nlls_prob, LevenbergMarquardt(damping_initial = 100); maxiters = 1000, show_trace = Val(true),
+res = solve(nlls_prob, TrustRegion(); maxiters = 1000, show_trace = Val(true),
     trace_level = TraceWithJacobianConditionNumber(25))
 
 newp = res.u

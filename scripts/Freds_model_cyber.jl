@@ -52,21 +52,21 @@ teval = 3600
 rhs! = create_cyberneticfredsmodel(v, De, dx, c_in, 2)
 
 ## parameters
-k_no3 = 5e-9 # reaction rate of no3- [1/s]
-k_no3c = 1.87e-7
-k_no2 = 2.3e-8 # reaction rate of no2- [1/s]
-k_no2c = 1.8e-7
-K_no3 = 2.1e-3 # half-saturation constant of no3- [mmol/L]
-K_no2 = 1e-3 # half-saturation constant of no2- [mmol/L]
-K_pyr = 1e-3 # half-saturation constant of pyr [mmol/L]
-K_c = 0.6e-2 # half-saturation constant of c [mmol/L]
+k_no3 = 3e-9 # reaction rate of no3- [1/s]
+k_no3c = 2.14e-7
+k_no2 = 4e-8 # reaction rate of no2- [1/s]
+k_no2c = 6.6e-7
+K_no3 = 2.2e-3 # half-saturation constant of no3- [mmol/L]
+K_no2 = 5.6e-4 # half-saturation constant of no2- [mmol/L]
+K_pyr = 4.1e-4 # half-saturation constant of pyr [mmol/L]
+K_c = 8.2e-3 # half-saturation constant of c [mmol/L]
 c_t = 0.07e-3 # total concentration of no3- [mmol/L]
 st = 0.4 # steepness of the activation function [-]
-δpyr = 466
-δc = 10000
+δpyr = 1.7
+δc = 3.2
 p0 = [k_no3, k_no2, k_no3c, k_no2c, K_no3, K_no2, K_pyr, K_c, δpyr, δc]
-lb = [1e-9, 1e-9, 1e-9, 1e-9, 1e-5, 1e-5, 1e-6, 1e-6, 100, 100]
-ub = [1e-2, 1e-2, 1e-2, 1e-2, 1e-1, 1e-1, 1e-1, 1e-1, 100000, 100000]
+lb = [1e-9, 1e-9, 1e-9, 1e-9, 1e-5, 1e-5, 1e-6, 1e-6, 1e-4, 1e-4]
+ub = [1e-2, 1e-2, 1e-2, 1e-2, 1e-1, 1e-1, 1e-1, 1e-1, 1000, 1000]
 ## optimizing the problem and ODE solver
 old_prob = ODEProblem(rhs!, u0, tspan, p0)
 du0 = zeros(size(u0))
@@ -93,6 +93,8 @@ no2 = sheet_data[!,"NO2-"]*1e-3
 no2_idx = findall(!ismissing, no2)
 no2 = convert.(Float64,no2[no2_idx])
 t_no2 = t[no2_idx]
+weights_no3 = ifelse.(t_no3 .< 75, 1., 10.)
+weights_no2 = ifelse.(t_no2 .< 75, 1. ,10.)
 
 function cost_2324(p)
     p = exp.(p)
@@ -101,19 +103,17 @@ function cost_2324(p)
     if sol.retcode != :Success
         return 1e3
     end
-    return sum(abs2, [reshape(sol.u[i],size(u0))[end,1] for i in eachindex(sol.u)][no3_idx] .- no3.*1e-3) +
-     sum(abs2, [reshape(sol.u[i],size(u0))[end,2] for i in eachindex(sol.u)][no2_idx] .- no2.*1e-3)*1000
+    return sum(abs2, ([reshape(sol.u[i],size(u0))[end,1] for i in eachindex(sol.u)][no3_idx] .- no3.*1e-3)./weights_no3) +
+     sum(abs2, ([reshape(sol.u[i],size(u0))[end,2] for i in eachindex(sol.u)][no2_idx] .- no2.*1e-3)./weights_no2)*1000
 end
 
 cost_2324(log.(p0))
 
-res = PRIMA.bobyqa(cost_2324, log.(p), xl = log.(lb), xu = log.(ub),
+res = PRIMA.bobyqa(cost_2324, log.(p0), xl = log.(lb), xu = log.(ub),
    iprint = PRIMA.MSG_RHO, maxfun = 200)
 
 cost_2324(res[1])
-p = exp.([-1.911171191385294E+001,  -1.549301002975774E+001,  -1.758630792478206E+001,  -1.553243855628816E+001,
--6.163876433620433E+000,  -6.859708568934940E+000,  -5.106045714507963E+000,  -9.704597807918070E+000,
- 6.144385452825698E+000,   9.210009742613916E+000])
+p = exp.(res[1])
 sol = solve(remake(fastprob, p=p), QNDF(), saveat=t.*3600, abstol = 1e-8, reltol = 1e-8)
 # Plot the results:
 fig = Figure()

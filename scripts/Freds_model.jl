@@ -101,10 +101,10 @@ end
 
 cost_2324(p0)
 
-res = PRIMA.bobyqa(cost_2324, p0, xl = lb, xu = ub, rhobeg = 5e-9,
-   iprint = PRIMA.MSG_RHO)
+# res = PRIMA.bobyqa(cost_2324, p0, xl = lb, xu = ub, rhobeg = 5e-9,
+#    iprint = PRIMA.MSG_RHO)
 
-cost_2324(res[1])
+# cost_2324(res[1])
 #p = res[1]
 #sol = solve(remake(fastprob, p=p), CVODE_BDF(linear_solver=:GMRES), saveat=t.*3600, abstol = 1e-8, reltol = 1e-8)
 # Plot the results:
@@ -121,3 +121,4 @@ scatter!(ax, t_no3, no3.*1e-3, label = "NO3- data", color = :blue)
 scatter!(axno2, t_no2, no2.*1e-3, label = "NO2- data", color = :red)
 #lines!(ax, sol.t./3600, [reshape(sol.u[i],size(u0))[1,4] for i in eachindex(sol.u)], label = "B inlet", color = :green)
 fig
+save("plots/freds_model_23-24_Marc.png", fig)

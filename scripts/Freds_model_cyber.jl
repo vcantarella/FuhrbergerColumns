@@ -23,7 +23,6 @@ A = pi*r^2 #cross-sectional area of the column [m²]
 
 
 # Initial and boundary conditions
-
 Q = 48.9/60*1e-9 #flow rate [m³/s]
 q = Q/A #specific flow rate [m/s]
 
@@ -38,10 +37,11 @@ De = [αˡ*v αˡ*v] + Di #dispersion coefficient [m²/s]
 
 ## initial conditions:
 c_in = [1.3e-3 0.0] # inflow concentration of no3- and no2- [mmol/L]
-u0 = zeros(length(x), 4) .+ 1e-16
+u0 = zeros(length(x), 6) .+ 1e-16
 u0[:,3] .= 62e-3 # initial concentration of edc [mmol/Lw] # water equivalent
-u0[:,4] .= 2e-3 # initial biomass concentration [-]
-
+u0[:,4] .= 5e-4 # initial biomass concentration [-]
+u0[:,5] .= 1e-16 # initial value of u1
+u0[:,6] .= 1e-16 # initial value u2
 # Model time
 # Duration, injection time & conc. and flow rate:--------------------------
 t_end  = 181.5 # Experiment end time [h]
@@ -52,21 +52,23 @@ teval = 3600
 rhs! = create_cyberneticfredsmodel(v, De, dx, c_in, 2)
 
 ## parameters
-k_no3 = 3e-9 # reaction rate of no3- [1/s]
-k_no3c = 2.14e-7
-k_no2 = 4e-8 # reaction rate of no2- [1/s]
-k_no2c = 6.6e-7
-K_no3 = 2.2e-3 # half-saturation constant of no3- [mmol/L]
-K_no2 = 5.6e-4 # half-saturation constant of no2- [mmol/L]
-K_pyr = 4.1e-4 # half-saturation constant of pyr [mmol/L]
-K_c = 8.2e-3 # half-saturation constant of c [mmol/L]
-c_t = 0.07e-3 # total concentration of no3- [mmol/L]
+k_no3 = 1e-11 # reaction rate of no3- [1/s]
+k_no3c = 2.64e-9
+k_no2 = 2e-10 # reaction rate of no2- [1/s]
+k_no2c = 1e-8
+K_no3 = 3e-3 # half-saturation constant of no3- [mmol/L]
+K_no2 = 2e-2 # half-saturation constant of no2- [mmol/L]
+K_pyr = 4.e-2 # half-saturation constant of pyr [mmol/L]
+K_c = 8.2e-2 # half-saturation constant of c [mmol/L]
+c_t = 0.07e-2 # total concentration of no3- [mmol/L]
 st = 0.4 # steepness of the activation function [-]
-δpyr = 1.7
-δc = 3.2
-p0 = [k_no3, k_no2, k_no3c, k_no2c, K_no3, K_no2, K_pyr, K_c, δpyr, δc]
-lb = [1e-9, 1e-9, 1e-9, 1e-9, 1e-5, 1e-5, 1e-6, 1e-6, 1e-4, 1e-4]
-ub = [1e-2, 1e-2, 1e-2, 1e-2, 1e-1, 1e-1, 1e-1, 1e-1, 1000, 1000]
+δpyr = 100
+δc = 10
+α = 1.5e-5
+k_dec = 1e-6 # decay rate of the enzyme [1/s]
+p0 = [k_no3, k_no2, k_no3c, k_no2c, K_no3, K_no2, K_pyr, K_c, δpyr, δc, α, k_dec]
+lb = [1e-12, 1e-12, 1e-12, 1e-12, 1e-5, 1e-5, 1e-6, 1e-6, 0, 0, 1e-10, 1e-10]
+ub = [1e-2, 1e-2, 1e-2, 1e-2, 1e-1, 1e-1, 1e-1, 1e-1, 200, 200, 1e-3, 1e-3]
 ## optimizing the problem and ODE solver
 old_prob = ODEProblem(rhs!, u0, tspan, p0)
 du0 = zeros(size(u0))
@@ -94,27 +96,31 @@ no2_idx = findall(!ismissing, no2)
 no2 = convert.(Float64,no2[no2_idx])
 t_no2 = t[no2_idx]
 weights_no3 = ifelse.(t_no3 .< 75, 1., 10.)
-weights_no2 = ifelse.(t_no2 .< 75, 1. ,10.)
+weights_no2 = ifelse.(t_no2 .< 75, 2. ,10.)
 
 function cost_2324(p)
     p = exp.(p)
+    p[9] = -p[9]
+    p[10] = -p[10]
     cost_prob = remake(fastprob, p=p)
-    sol = solve(cost_prob, QNDF(), saveat=t.*3600, abstol = 1e-8, reltol = 1e-8)
+    sol = solve(cost_prob, QNDF(), saveat=t.*3600, abstol = 1e-10, reltol = 1e-10)
     if sol.retcode != :Success
         return 1e3
     end
     return sum(abs2, ([reshape(sol.u[i],size(u0))[end,1] for i in eachindex(sol.u)][no3_idx] .- no3.*1e-3)./weights_no3) +
-     sum(abs2, ([reshape(sol.u[i],size(u0))[end,2] for i in eachindex(sol.u)][no2_idx] .- no2.*1e-3)./weights_no2)*1000
+     sum(abs2, ([reshape(sol.u[i],size(u0))[end,2] for i in eachindex(sol.u)][no2_idx] .- no2.*1e-3)./weights_no2)*800
 end
 
 cost_2324(log.(p0))
 
 res = PRIMA.bobyqa(cost_2324, log.(p0), xl = log.(lb), xu = log.(ub),
-   iprint = PRIMA.MSG_RHO, maxfun = 200)
+   iprint = PRIMA.MSG_RHO, maxfun = 5000)
 
 cost_2324(res[1])
-p = exp.(res[1])
-sol = solve(remake(fastprob, p=p), QNDF(), saveat=t.*3600, abstol = 1e-8, reltol = 1e-8)
+p =  exp.(res[1])
+p[9] = -p[9]
+p[10] = -p[10]
+sol = solve(remake(fastprob, p=p), QNDF(), saveat=t.*3600, abstol = 1e-10, reltol = 1e-10)
 # Plot the results:
 fig = Figure()
 ax = Axis(fig[1, 1], title = "Model vs. Data",

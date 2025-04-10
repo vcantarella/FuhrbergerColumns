@@ -86,38 +86,51 @@ function create_cyberneticfredsmodel(v, De, dx, c_in, nmob)
 
     function rhscyber!(du, u, p, t)
         # unpack the parameters
-        k_no3, k_no2, k_no3c, k_no2c, K_no3, K_no2, K_pyr, K_c, δpyr, δc = p
+        k_no3, k_no2, k_no3c, k_no2c, K_no3, K_no2, K_pyr, K_c, δpyr, δc, α, k_dec = p
         # unpack the state variables
         no3_ = u[:,1]
         no2_ = u[:,2]
         s_edc = u[:,3] # solid ed
         s_c = u[:,4] # solid c
+        ep = u[:,5] # enzyme for pyr
+        ec = u[:,6] # enzyme for c
 
+        δno3 = 200
+        δno2 = 400
         # Activation function:
-
+        F_no3 = @. no3_ / (K_no3 + no3_)
+        F_no2 = @. no2_ / (K_no2 + no2_)
+        Fp = @. s_edc / (s_edc + K_pyr)
+        Fc = @. s_c / (s_c + K_c)
+        Fpno3 = @. F_no3 * Fp
+        Fpno2 = @. F_no2 * Fp
+        Fpno3c = @. F_no3 * Fp * Fc
+        Fpno2c = @. F_no2 * Fp * Fc
+        # Activation function:
+        l1 = @. (δno3 + δpyr)*k_no3*Fpno3*(δno2 + δpyr)*k_no2*Fpno2
+        l2 = @. (δno3 + δc)*k_no3c*Fpno3c*(δno2 + δc)*k_no2c*Fpno2c
+        u1 = @. (1-k_dec*(ec + ep*(δpyr*l1/l2)))/(1-α*Fp*l1/l2)
+        u1 = @. ifelse(u1>0, u1, 0)
+        u2 = @. 1 - u1
+        # Enzyme functions
+        @. du[:,5] = α*Fp*u1 - k_dec*ep
+        @. du[:,6] = α*Fc*u2 - k_dec*ec
+        # reactions
+        r_no3 = @. k_no3 * Fpno3
+        r_no2 = @. k_no2 * Fpno2
+        r_no3c = @. k_no3c * Fpno3c
+        r_no2c = @. k_no2c * Fpno2c
 
         # transport
         c_advec = [c_in;u[:,1:nmob]]
         advec = -v .* diff(c_advec, dims=1) ./ dx
         gradc = diff(u[:,1:nmob], dims=1)./dx
         disp = ([gradc; zeros(1, nmob)]-[zeros(1, nmob); gradc]).* De ./ dx
-        # reaction
-        r_no3 = @. k_no3 * no3_ / (K_no3 + no3_) * s_edc / (s_edc + K_pyr)
-        r_no2 = @. k_no2 * no2_ / (K_no2 + no2_) * s_edc / (s_edc + K_pyr)
-        r_no3c = @. k_no3c * no3_ / (K_no3 + no3_) * s_c / (s_c + K_c)
-        r_no2c = @. k_no2c * no2_ / (K_no2 + no2_) * s_c / (s_c + K_c)
-
-        max_r = maximum(hcat(δpyr.*r_no3, δpyr.*r_no2, δc.*r_no3c, δc.*r_no2c), dims=2)
-        v_rno3 = @. δpyr*r_no3/max_r
-        v_rno2 = @. δpyr*r_no2/max_r
-        v_rno3c = @. δc*r_no3c/max_r
-        v_rno2c = @. δc*r_no2c/max_r
-
-
-        @. du[:,1] = advec[:,1] + disp[:,1] - 7*r_no3*v_rno3 - 2*r_no3c*v_rno3c
-        @. du[:,2] = advec[:,2] + disp[:,2] + 7*r_no3*v_rno3 + 2*r_no3c*v_rno3c - 14*r_no2*v_rno2 - 4*r_no2c*v_rno2c
-        @. du[:,3] = -r_no3*v_rno3 - 3*r_no2*v_rno2
-        @. du[:,4] = -r_no3c*v_rno3c - 3*r_no2c*v_rno2c
+        # du/dt
+        @. du[:,1] = advec[:,1] + disp[:,1] - 7*r_no3 - 2*r_no3c
+        @. du[:,2] = advec[:,2] + disp[:,2] + 7*r_no3 + 2*r_no3c - 14*r_no2 - 4*r_no2c
+        @. du[:,3] = -r_no3 - 3*r_no2
+        @. du[:,4] = -r_no3c - 3*r_no2c
     end
     return rhscyber!
 end

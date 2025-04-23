@@ -86,7 +86,7 @@ function create_cyberneticfredsmodel(v, De, dx, c_in, nmob)
 
     function rhscyber!(du, u, p, t)
         # unpack the parameters
-        k_no3, k_no2, k_no3c, k_no2c, K_no3, K_no2, K_pyr, K_c, δpyr, δc, α, k_dec = p
+        k_no3, k_no2, k_no3c, k_no2c, K_no3, K_no2, K_pyr, K_c, δpyr, δc, α, k_dec, K_u = p
         # unpack the state variables
         no3_ = u[:,1]
         no2_ = u[:,2]
@@ -107,14 +107,14 @@ function create_cyberneticfredsmodel(v, De, dx, c_in, nmob)
         Fpno3c = @. F_no3 * Fp * Fc
         Fpno2c = @. F_no2 * Fp * Fc
         # Activation function:
-        l1 = @. (δno3 + δpyr)*k_no3*Fpno3*(δno2 + δpyr)*k_no2*Fpno2
-        l2 = @. (δno3 + δc)*k_no3c*Fpno3c*(δno2 + δc)*k_no2c*Fpno2c
-        u1 = @. (1-k_dec*(ec + ep*(δpyr*l1/l2)))/(1-α*Fp*l1/l2)
+        Fpp = @. (δno3 + δpyr)*k_no3*Fpno3 + (δno2 + δpyr)*k_no2*Fpno2
+        Fcc = @. (δno3 + δc)*k_no3c*Fpno3c + (δno2 + δc)*k_no2c*Fpno2c
+        u1 = @. (1 - (√(Fcc/Fpp)-1)*K_u) / (1 + √(Fcc/Fpp))
         u1 = @. ifelse(u1>0, u1, 0)
         u2 = @. 1 - u1
         # Enzyme functions
-        @. du[:,5] = α*Fp*u1 - k_dec*ep
-        @. du[:,6] = α*Fc*u2 - k_dec*ec
+        @. du[:,5] = α*u1/(K_u + u1) - k_dec*ep
+        @. du[:,6] = α*u2/(K_u + u2) - k_dec*ec
         # reactions
         r_no3 = @. k_no3 * Fpno3
         r_no2 = @. k_no2 * Fpno2

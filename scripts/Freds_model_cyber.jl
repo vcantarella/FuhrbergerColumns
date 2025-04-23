@@ -52,23 +52,24 @@ teval = 3600
 rhs! = create_cyberneticfredsmodel(v, De, dx, c_in, 2)
 
 ## parameters
-k_no3 = 1e-11 # reaction rate of no3- [1/s]
-k_no3c = 2.64e-9
-k_no2 = 2e-10 # reaction rate of no2- [1/s]
-k_no2c = 1e-8
+k_no3 = 5e-9 # reaction rate of no3- [1/s]
+k_no3c = 8e-8
+k_no2 = 2e-7 # reaction rate of no2- [1/s]
+k_no2c = 8e-6
 K_no3 = 3e-3 # half-saturation constant of no3- [mmol/L]
 K_no2 = 2e-2 # half-saturation constant of no2- [mmol/L]
 K_pyr = 4.e-2 # half-saturation constant of pyr [mmol/L]
 K_c = 8.2e-2 # half-saturation constant of c [mmol/L]
 c_t = 0.07e-2 # total concentration of no3- [mmol/L]
 st = 0.4 # steepness of the activation function [-]
-δpyr = 100
-δc = 10
-α = 1.5e-5
-k_dec = 1e-6 # decay rate of the enzyme [1/s]
-p0 = [k_no3, k_no2, k_no3c, k_no2c, K_no3, K_no2, K_pyr, K_c, δpyr, δc, α, k_dec]
-lb = [1e-12, 1e-12, 1e-12, 1e-12, 1e-5, 1e-5, 1e-6, 1e-6, 0, 0, 1e-10, 1e-10]
-ub = [1e-2, 1e-2, 1e-2, 1e-2, 1e-1, 1e-1, 1e-1, 1e-1, 200, 200, 1e-3, 1e-3]
+δpyr = 10
+δc = 200
+α = 1.5e-3
+k_dec = 0.05/3600 # decay rate of the enzyme [1/s]
+K_u = 0.01
+p0 = [k_no3, k_no2, k_no3c, k_no2c, K_no3, K_no2, K_pyr, K_c, δpyr, δc, α, k_dec, K_u]
+lb = [1e-12, 1e-12, 1e-12, 1e-12, 1e-5, 1e-5, 1e-6, 1e-6, 0, 0, 1e-10, 1e-10, 1e-3]
+ub = [1e-2, 1e-2, 1e-2, 1e-2, 1e-1, 1e-1, 1e-1, 1e-1, 200, 200, 1e-3, 1e-3, 0.9]
 ## optimizing the problem and ODE solver
 old_prob = ODEProblem(rhs!, u0, tspan, p0)
 du0 = zeros(size(u0))
@@ -108,7 +109,7 @@ function cost_2324(p)
         return 1e3
     end
     return sum(abs2, ([reshape(sol.u[i],size(u0))[end,1] for i in eachindex(sol.u)][no3_idx] .- no3.*1e-3)./weights_no3) +
-     sum(abs2, ([reshape(sol.u[i],size(u0))[end,2] for i in eachindex(sol.u)][no2_idx] .- no2.*1e-3)./weights_no2)*800
+     sum(abs2, ([reshape(sol.u[i],size(u0))[end,2] for i in eachindex(sol.u)][no2_idx] .- no2.*1e-3)./weights_no2)*1000
 end
 
 cost_2324(log.(p0))
@@ -125,7 +126,7 @@ sol = solve(remake(fastprob, p=p), QNDF(), saveat=t.*3600, abstol = 1e-10, relto
 fig = Figure()
 ax = Axis(fig[1, 1], title = "Model vs. Data",
    xlabel = "Time (h)", ylabel = "Concentration (mmol/L)",
-   yticks = 0:0.2:1.3
+   #yticks = 0:0.2:1.3
    )
 axno2 = Axis(fig[1,1],yaxisposition = :right, ygridvisible = false, xgridvisible = false, ylabel = "[NO2⁻]")
 

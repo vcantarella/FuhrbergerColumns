@@ -84,11 +84,12 @@ sol = solve(fastprob, QNDF(), saveat=teval, abstol = 1e-8, reltol = 1e-8)
 df23_24 = CSV.File(datadir("exp_pro","freds_processed_data_23-24.csv")) |> DataFrame
 df27_28 = CSV.File(datadir("exp_pro","freds_processed_data_27-28.csv")) |> DataFrame
 
+
 # lets start with the first data set
 sheet = "23-24"
 sheet_data = df23_24
 t = sheet_data[!, "h"]
-no3 = sheet_data[!,"NO3-"]
+no3 = sheet_data[sheet_data[!,"analytical_proc"].=="Ulla","NO3-"]
 no3_idx = findall(!ismissing, no3)
 no3 = convert.(Float64,no3[no3_idx])
 t_no3 = t[no3_idx]
@@ -96,8 +97,19 @@ no2 = sheet_data[!,"NO2-"]*1e-3
 no2_idx = findall(!ismissing, no2)
 no2 = convert.(Float64,no2[no2_idx])
 t_no2 = t[no2_idx]
-weights_no3 = ifelse.(t_no3 .< 75, 1., 10.)
-weights_no2 = ifelse.(t_no2 .< 75, 2. ,10.)
+
+# data_deep
+sheet_data = df27_28
+t_deep = sheet_data[!, "h"]
+no3_deep = sheet_data[sheet_data[!,"analytical_proc"].=="Ulla","NO3-"]
+no3_deep_idx = findall(!ismissing, no3_deep)
+no3_deep = convert.(Float64,no3_deep[no3_deep_idx])
+t_no3_deep = t_deep[no3_deep_idx]
+no2_deep = sheet_data[!,"NO2-"]*1e-3
+no2_deep_idx = findall(!ismissing, no2_deep)
+no2_deep = convert.(Float64,no2_deep[no2_deep_idx])
+t_no2_deep = t_deep[no2_deep_idx]
+
 
 function cost_2324(p)
     p = exp.(p)
@@ -108,8 +120,8 @@ function cost_2324(p)
     if sol.retcode != :Success
         return 1e3
     end
-    return sum(abs2, ([reshape(sol.u[i],size(u0))[end,1] for i in eachindex(sol.u)][no3_idx] .- no3.*1e-3)./weights_no3) +
-     sum(abs2, ([reshape(sol.u[i],size(u0))[end,2] for i in eachindex(sol.u)][no2_idx] .- no2.*1e-3)./weights_no2)*1000
+    return sum(abs2, ([reshape(sol.u[i],size(u0))[end,1] for i in eachindex(sol.u)][no3_idx] .- no3.*1e-3)) +
+     sum(abs2, ([reshape(sol.u[i],size(u0))[end,2] for i in eachindex(sol.u)][no2_idx] .- no2.*1e-3))*1000
 end
 
 cost_2324(log.(p0))

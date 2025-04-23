@@ -36,27 +36,39 @@ for sheet in sheets
     sheet_data = data[sheet]
     
     # Extract columns and skip missing values
-    time = sheet_data[!, "h"]
-    no3 = collect(skipmissing(sheet_data[!,"NO3-"]))
+    ttm = sheet_data[!, "h"]
+    no3_ulla = collect(skipmissing(sheet_data[sheet_data[!,:analytical_proc].=="Ulla","NO3-"]))
+    no3_fred = collect(skipmissing(sheet_data[sheet_data[!,:analytical_proc].=="Fred","NO3-"]))
     so4 = collect(skipmissing(sheet_data[!,"SO4-2"]))
-    no2 = collect(skipmissing(sheet_data[!,"NO2-"])).*1e-3
-    # Filter time values corresponding to non-missing values
-
-    time_no3 = time[.!ismissing.(sheet_data[!,"NO3-"])]
-    time_so4 = time[.!ismissing.(sheet_data[!,"SO4-2"])]
-    time_no2 = time[.!ismissing.(sheet_data[!,"NO2-"])]
+    no2_ulla = collect(skipmissing(sheet_data[sheet_data[!,:analytical_proc].=="Ulla","NO2-"])).*1e-3
+    no2_fred = collect(skipmissing(sheet_data[sheet_data[!,:analytical_proc].=="Fred","NO2-"])).*1e-3
+    # Filter ttm values corresponding to non-missing values
+    time_ulla = ttm[sheet_data[!,:analytical_proc].=="Ulla"]
+    time_fred = ttm[sheet_data[!,:analytical_proc].=="Fred"]
+    time_no3_ulla = time_ulla[.!ismissing.(sheet_data[sheet_data[!,:analytical_proc].=="Ulla","NO3-"])]
+    time_no3_fred = time_fred[.!ismissing.(sheet_data[sheet_data[!,:analytical_proc].=="Fred","NO3-"])]
+    time_so4 = ttm[.!ismissing.(sheet_data[!,"SO4-2"])]
+    time_no2_ulla = time_ulla[.!ismissing.(sheet_data[sheet_data[!,:analytical_proc].=="Ulla","NO2-"])]
+    time_no2_fred = time_fred[.!ismissing.(sheet_data[sheet_data[!,:analytical_proc].=="Fred","NO2-"])]
+    # time_no2 = ttm[.!ismissing.(sheet_data[!,"NO2-"])]
     
     # Create a figure
     fig = Figure(size = (800, 600))
     
-    # Plot each ion concentration against time
-    ax = Axis(fig[1, 1], title = "Ion Concentrations over Time in $sheet", xlabel = "Time (h)", ylabel = "Concentration")
-    lines!(ax, time_no3, no3, label = "NO3-", color = "#60F5AC")
+    # Plot each ion concentration against ttm
+    ax = Axis(fig[1, 1], title = "Ion Concentrations over ttm in $sheet", xlabel = "ttm (h)", ylabel = "Concentration")
+    lines!(ax, time_no3_ulla, no3_ulla, label = "NO3- Ulla", color = "#60F5AC", linestyle = :dash)
+    lines!(ax, time_no3_fred, no3_fred, label = "NO3- Fred", color = "#60F5AC")
     lines!(ax, time_so4, so4, label = "SO4-2", color = "#A3625A")
-    lines!(ax, time_no2, no2, label = "NO2-", color = "#635250")
-    scatter!(ax, time_no3, no3, color = "#7FBDF9", markersize = 8)
-    scatter!(ax, time_so4, so4, color = "#A3625A", markersize = 8)
-    scatter!(ax, time_no2, no2, color = "#635250", markersize = 8)
+    lines!(ax, time_no2_ulla, no2_ulla, label = "NO2-", color = "#635250", linestyle = :dash)
+    lines!(ax, time_no2_fred, no2_fred, label = "NO2- Fred", color = "#635250")
+    scatter!(ax, time_no3_ulla, no3_ulla, color = "#60F5AC", markersize = 8)
+    scatter!(ax, time_no3_fred, no3_fred, color = "#60F5AC", markersize = 8)
+    scatter!(ax, time_no2_ulla, no2_ulla, color = "#635250", markersize = 8)
+    scatter!(ax, time_no2_fred, no2_fred, color = "#635250", markersize = 8)
+    #scatter!(ax, time_no3, no3, color = "#7FBDF9", markersize = 8)
+    #scatter!(ax, time_so4, so4, color = "#A3625A", markersize = 8)
+    #scatter!(ax, time_no2, no2, color = "#635250", markersize = 8)
     
     # Add grid lines
     
@@ -64,13 +76,15 @@ for sheet in sheets
 
     
     # Add a subplot for low concentrations
-    ax_zoom = Axis(fig[2, 1], title = "Zoomed Ion Concentrations", xlabel = "Time (h)", ylabel = "Concentration")
-    lines!(ax_zoom, time_no3[no3 .< threshold], no3[no3 .< threshold], label = "NO3-", color = "#7FBDF9")
+    ax_zoom = Axis(fig[2, 1], title = "Zoomed Ion Concentrations", xlabel = "ttm (h)", ylabel = "Concentration")
+    lines!(ax_zoom, time_no3_fred[no3_fred .< threshold], no3_fred[no3_fred .< threshold], label = "NO3- Fred", color = "#7FBDF9")
     lines!(ax_zoom, time_so4[so4 .< threshold], so4[so4 .< threshold], label = "SO4-2", color = "#A3625A")
-    lines!(ax_zoom, time_no2[no2 .< threshold], no2[no2 .< threshold], label = "NO2-", color = "#635250")
-    scatter!(ax_zoom, time_no3[no3 .< threshold], no3[no3 .< threshold], color = "#7FBDF9", markersize = 11)
+    lines!(ax_zoom, time_no2_ulla[no2_ulla .< threshold], no2_ulla[no2_ulla .< threshold], label = "NO2- Ulla", color = "#635250", linestyle = :dash)
+    lines!(ax_zoom, time_no2_fred[no2_fred .< threshold], no2_fred[no2_fred .< threshold], label = "NO2- Fred", color = "#635250")
+    scatter!(ax_zoom, time_no3_fred[no3_fred .< threshold], no3_fred[no3_fred .< threshold], color = "#7FBDF9", markersize = 11)
     scatter!(ax_zoom, time_so4[so4 .< threshold], so4[so4 .< threshold], color = "#A3625A", markersize = 11)
-    scatter!(ax_zoom, time_no2[no2 .< threshold], no2[no2 .< threshold], color = "#635250", markersize = 11)
+    scatter!(ax_zoom, time_no2_ulla[no2_ulla .< threshold], no2_ulla[no2_ulla .< threshold], color = "#635250", markersize = 11)
+    scatter!(ax_zoom, time_no2_fred[no2_fred .< threshold], no2_fred[no2_fred .< threshold], color = "#635250", markersize = 11)
     
     # Add grid lines to zoomed plot
     
@@ -95,18 +109,18 @@ for (i, sheet) in enumerate(sheets)
     sheet_data = data[sheet]
     
     # Extract columns and skip missing values
-    time = sheet_data[!, "h"]
+    ttm = sheet_data[!, "h"]
     no3 = collect(skipmissing(sheet_data[!,"NO3-"]))
     so4 = collect(skipmissing(sheet_data[!,"SO4-2"]))
     no2 = collect(skipmissing(sheet_data[!,"NO2-"])).*1e-3
     
-    # Filter time values corresponding to non-missing values
-    time_no3 = time[.!ismissing.(sheet_data[!,"NO3-"])]
-    time_so4 = time[.!ismissing.(sheet_data[!,"SO4-2"])]
-    time_no2 = time[.!ismissing.(sheet_data[!,"NO2-"])]
+    # Filter ttm values corresponding to non-missing values
+    time_no3 = ttm[.!ismissing.(sheet_data[!,"NO3-"])]
+    time_so4 = ttm[.!ismissing.(sheet_data[!,"SO4-2"])]
+    time_no2 = ttm[.!ismissing.(sheet_data[!,"NO2-"])]
     
     # Create subplots
-    ax = Axis(fig[1, i], xlabel = "Time (h)", ylabel = "Concentration (mmol/L)",
+    ax = Axis(fig[1, i], xlabel = "ttm (h)", ylabel = "Concentration (mmol/L)",
     xlabelsize = 14, ylabelsize = 14, xticklabelsize = 12, yticklabelsize = 12)
     lines!(ax, time_no3, no3, label = "NO3-", color = "#7FBDF9")
     lines!(ax, time_so4, so4, label = "SO4-2", color = "#A3625A")
@@ -116,7 +130,7 @@ for (i, sheet) in enumerate(sheets)
     scatter!(ax, time_no2, no2, color = "#635250", markersize = 11)
     
     # Add a subplot for low concentrations
-    ax_zoom = Axis(fig[2, i], xlabel = "Time (h)", ylabel = "Concentration (mmol/L)",
+    ax_zoom = Axis(fig[2, i], xlabel = "ttm (h)", ylabel = "Concentration (mmol/L)",
     xlabelsize = 14, ylabelsize = 14, xticklabelsize = 12, yticklabelsize = 12)
     lines!(ax_zoom, time_no3[no3 .< threshold], no3[no3 .< threshold], label = "NO3-", color = "#7FBDF9")
     lines!(ax_zoom, time_so4[so4 .< threshold], so4[so4 .< threshold], label = "SO4-2", color = "#A3625A")
@@ -158,10 +172,10 @@ save(plotsdir("freds_plot_combined.png"), fig)
 # Create a figure
 fig = Figure(size = (800, 600))
 # pH Axis
-ax_pH = Axis(fig[1, 1], xlabel = "Time (h)", ylabel = "pH",
+ax_pH = Axis(fig[1, 1], xlabel = "ttm (h)", ylabel = "pH",
     xlabelsize = 14, ylabelsize = 14, xticklabelsize = 12, yticklabelsize = 12)
 # EC Axis
-ax_EC = Axis(fig[2, 1], xlabel = "Time (h)", ylabel = "EC (µS/cm)",
+ax_EC = Axis(fig[2, 1], xlabel = "ttm (h)", ylabel = "EC (µS/cm)",
     xlabelsize = 14, ylabelsize = 14, xticklabelsize = 12, yticklabelsize = 12)
 # plot the data from each sheet
 ## create a color palette
@@ -169,11 +183,11 @@ palette = [:blue, :green]
 ## iterate over the sheets
 for (i, sheet) in enumerate(sheets)
     sheet_data = data[sheet]
-    time = sheet_data[!, "h"]
+    ttm = sheet_data[!, "h"]
     pH = collect(skipmissing(sheet_data[!,"pH"]))
     EC = collect(skipmissing(sheet_data[!,"EC"]))
-    time_pH = time[.!ismissing.(sheet_data[!,"pH"])]
-    time_EC = time[.!ismissing.(sheet_data[!,"EC"])]
+    time_pH = ttm[.!ismissing.(sheet_data[!,"pH"])]
+    time_EC = ttm[.!ismissing.(sheet_data[!,"EC"])]
     lines!(ax_pH, time_pH, pH, label = sheet, color = palette[i])
     lines!(ax_EC, time_EC, EC, label = sheet, color = palette[i])
     scatter!(ax_pH, time_pH, pH, color = palette[i], markersize = 11)

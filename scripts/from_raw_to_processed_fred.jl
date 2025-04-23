@@ -6,7 +6,7 @@ using Dates
 using CSV
 
 # Define the path to the Excel file
-excel_file_path = datadir("exp_raw", "Table_Fred.xlsx")
+excel_file_path = datadir("exp_raw", "experimental_data_Fred_raw.xlsx")
 
 
 # Here you may include files from the source directory
@@ -39,7 +39,7 @@ function process_excel_sheets(file_path)
             df."SO4-2" = df."SO4-2(mg/L)"./96.06
             df."NO2-" = df."NO2 (micromol/L)"
             df."EC" = df."EC (µS/cm)"
-            df = select(df, "h", "NO3-","NO2-", "SO4-2", "pH", "EC")
+            df = select(df, "h", "NO3-","NO2-", "SO4-2", "pH", "EC", "analytical_proc")
             # arrange df by "h"
             sort!(df, :h)
             CSV.write(joinpath(output_dir, "freds_processed_data_$sheet_name.csv"), df)

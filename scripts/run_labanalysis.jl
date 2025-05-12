@@ -167,3 +167,4 @@ Legend(figsens[3, 1:2], ax_kno3, position = :topright,
 resize_to_layout!(figsens)
 figsens
 save("plots/sensitivity_k.png", figsens)
+

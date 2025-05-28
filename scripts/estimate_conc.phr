@@ -1,0 +1,14 @@
+DATABASE phreeqc_old.dat
+SOLUTION
+    -units mg/L
+    Ca 4.84
+    Na 0.506
+    K 39.8
+    N(+5) 14
+    Cl 9.55
+    S(6) 205
+    C 0.1 charge
+    pH 7.5
+    Amm 67
+END
+

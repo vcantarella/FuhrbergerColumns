@@ -19,12 +19,14 @@ df4 = df[df.column .== 4, :]
 dfs = [df1, df2, df3, df4]
 # Make a plot for the most importntant data, skip misisng data
 colors = [:red, :blue, :green, :orange]
-fig = Figure()
+fig = Figure(size = (1200, 800))
 ax1 = Axis(fig[1, 1], title = "pH", ylabel = "pH", xlabel = "t (days)")
 ax2 = Axis(fig[2, 1], title = "EC", ylabel = "EC [μS/cm]", xlabel = "t (days)")
 ax3 = Axis(fig[1, 2], title = "NO2-", ylabel = "NO2- [μM]", xlabel = "t (days)")
 ax4 = Axis(fig[2, 2], title = "Q [μL/min]", ylabel = "Q [μL/min]", xlabel = "t (days)")
 ax5 = Axis(fig[2, 3], title = "Fe2+", ylabel = "Fe2+ [μM]", xlabel = "t (days)")
+ax6 = Axis(fig[1, 3], title = "NO3-", ylabel = "NO3- [μM]", xlabel = "t (days)")
+ax7 = Axis(fig[3, 1], title = "SO4-2", ylabel = "SO4-2 [μM]", xlabel = "t (days)")
 for i in 1:4
     # get the data for the column
     df = dfs[i]
@@ -55,6 +57,23 @@ for i in 1:4
     # plot the data
     lines!(ax3, t, NO2, label = "Column $i", color = colors[i])
     scatter!(ax3, t, NO2, label = "Column $i", color = colors[i])
+    NO3 = df[!, "NO3-"]
+    index = findall(!ismissing, NO3)
+    NO3 = NO3[index]
+    t = df[!, "t (unadjusted) [days]"]
+    t = t[index]
+    # plot the data
+    lines!(ax6, t, NO3, label = "Column $i", color = colors[i])
+    scatter!(ax6, t, NO3, label = "Column $i", color = colors[i])
+    # get the data for the column
+    SO4 = df[!, "SO4-2"]
+    index = findall(!ismissing, SO4)
+    SO4 = SO4[index]
+    t = df[!, "t (unadjusted) [days]"]
+    t = t[index]
+    # plot the data
+    lines!(ax7, t, SO4, label = "Column $i", color = colors[i])
+    scatter!(ax7, t, SO4, label = "Column $i", color = colors[i])
     # get the data for the column
     Q = df[!, "Q"]
     index = findall(!ismissing, Q)
@@ -74,6 +93,9 @@ for i in 1:4
     lines!(ax5, t, Fe, label = "Column $i", color = colors[i])
     scatter!(ax5, t, Fe, label = "Column $i", color = colors[i])
 end
-Legend(fig[3, 1:3], ax2, position = (0.5, 0.5), orientation = :horizontal, merge = true)
+ylims!(ax7, 2450, 2700)
+Legend(fig[4, 1:3], ax2, position = (0.5, 0.5), orientation = :horizontal, merge = true)
+# adjust the layout
+CairoMakie.resize_to_layout!(fig)
 fig
 save("lab_data.png", fig)

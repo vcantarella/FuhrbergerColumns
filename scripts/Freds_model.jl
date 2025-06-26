@@ -63,8 +63,8 @@ K_c = 0.5e-3 # half-saturation constant of c [mmol/L]
 c_t = 0.07e-3 # total concentration of no3- [mmol/L]
 st = 0.4 # steepness of the activation function [-]
 p0 = [k_no3, k_no2, k_no3c, k_no2c, K_no3, K_no2, K_pyr, K_c, c_t, st]
-lb = [1e-7, 1e-7, 1e-4, 1e-4, 1e-4, 0.1, 1e-8]
-ub = [1e-2, 1e-2, 10.0, 10.0, 0.2, 1.0, 1e-2]
+lb = [1e-12, 1e-12, 1e-12, 1e-12, 1e-4, 1e-4, 1e-4, 1e-4, 1e-6, 1e-8]
+ub = [1e-2, 1e-2, 1e-2, 1e-2, 10.0, 10.0, 10.0, 10.0, 1.0, 1e-2]
 ## optimizing the problem and ODE solver
 old_prob = ODEProblem(rhs!, u0, tspan, p0)
 du0 = zeros(size(u0))
@@ -93,20 +93,23 @@ no2 = convert.(Float64,no2[no2_idx])
 t_no2 = t[no2_idx]
 
 function cost_2324(p)
-    cost_prob = remake(fastprob, p=p)
+    cost_prob = remake(fastprob, p=exp.(p))
     sol = solve(cost_prob, QNDF(), saveat=t.*3600, abstol = 1e-10, reltol = 1e-10)
+    if sol.retcode != :Success
+        return 1e2
+    end
     return sum(abs2, [reshape(sol.u[i],size(u0))[end,1] for i in eachindex(sol.u)][no3_idx] .- no3.*1e-3) +
      sum(abs2, [reshape(sol.u[i],size(u0))[end,2] for i in eachindex(sol.u)][no2_idx] .- no2.*1e-3)*1000
 end
 
-cost_2324(p0)
+cost_2324(log.(p0))
 
-# res = PRIMA.bobyqa(cost_2324, p0, xl = lb, xu = ub, rhobeg = 5e-9,
-#    iprint = PRIMA.MSG_RHO)
+res = PRIMA.bobyqa(cost_2324, log.(p0), xl = log.(lb), xu = log.(ub), rhobeg = 1,
+   iprint = PRIMA.MSG_RHO)
 
 # cost_2324(res[1])
-#p = res[1]
-#sol = solve(remake(fastprob, p=p), CVODE_BDF(linear_solver=:GMRES), saveat=t.*3600, abstol = 1e-8, reltol = 1e-8)
+p = exp.(res[1])
+sol = solve(remake(fastprob, p=p), QNDF(), saveat=t.*3600, abstol = 1e-8, reltol = 1e-8)
 # Plot the results:
 fig = Figure()
 ax = Axis(fig[1, 1], title = "Model vs. Data",

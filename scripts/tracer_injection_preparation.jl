@@ -36,87 +36,72 @@ end_time_s = [Dates.Second(t - t0_dt) for t in end_time]
 Q = convert.(Float64, df[!,"Q"]) # flow rate in μL/min
 Q = Q .* 1e-3 / 60 # convert to cm3/s
 
-# save the flow rate data to a file
-save("data/br_flow_rate.jld2", Dict("Q" => Q,
-    "start_times" => Dates.value.(start_time_s),
-    "end_times" => Dates.value.(end_time_s),
-    "column" => convert.(Int64, df[!,"column"])))
 
-struct FlowRate{TQ<:AbstractVector, TTime<:AbstractVector}
-    Q::TQ
-    start_times::TTime
-    end_times::TTime
-end
-
-function (f::FlowRate)(t)
-    @inbounds for i in eachindex(f.start_times)
-        if t >= f.start_times[i] && t <= f.end_times[i]
-            return f.Q[i]
-        elseif t > f.end_times[i] && t < f.start_times[i+1]
-            return (f.Q[i]+ f.Q[i+1])/ 2
-        end
-    end
-    return zero(eltype(f.Q))
-end
-
-function calculate_flow_rate(Q, start_time_s, end_time_s)
-    # Q is a vector of flow rates in cm3/s
-    # start_time_s and end_time_s are vectors of start and end times in seconds since t0_dt
-    # return a function that takes a time t and returns the flow rate at that time
-    @assert length(Q) == length(start_time_s) == length(end_time_s)
-    @assert all(start_time_s .< end_time_s) # start times must be before end times
-    @assert all(Q .>= 0) # flow rates must be non-negative
-    return FlowRate(Q, start_time_s, end_time_s)
-end
-# create a FlowRate object per column
-column = convert.(Int64,df[!,"column"])
-flow_rates = Dict{Int64, FlowRate}()
-for col in 1:4
-    # get the flow rates for the column
-    Q_col = Q[column .== col]
-    start_time_s_col = Dates.value.(start_time_s[column .== col])
-    end_time_s_col = Dates.value.(end_time_s[column .== col])
-    # create a FlowRate object for the column
-    flow_rates[col] = calculate_flow_rate(Q_col, start_time_s_col, end_time_s_col)
-end
-Br = df[!,"Br-"] # concentration in mM
-## calculate the dead times to correct the start and end times.
-# <To calculate the dead times we use the dead volumes and the flow rates
 #Dead volumes per column
-dvs = Dict(1 => 66+35,
-           2 => 40+57+29,
-           3 => 41+38+34,
-           4 => 41+38.5+30) # in cm
+dvs = Dict(1 => 35,
+           2 => 29,
+           3 => 34,
+           4 => 30) # in cm
+dvs_t0 = Dict(1 => 66,
+              2 => 40+57,
+              3 => 41+38,
+              4 => 41+38.5) # in cm
 tube_diam = 0.152 # cm
 # Dead volume in cm3
 dv = Dict(1 => dvs[1] * π * (tube_diam/2)^2,
           2 => dvs[2] * π * (tube_diam/2)^2,
           3 => dvs[3] * π * (tube_diam/2)^2,
           4 => dvs[4] * π * (tube_diam/2)^2)
-# Dead time in seconds
-avg_time = @. convert(Float64,Dates.value(start_time_s + (end_time_s - start_time_s) ./ 2))
+dv_t0 = Dict(1 => dvs_t0[1] * π * (tube_diam/2)^2,
+             2 => dvs_t0[2] * π * (tube_diam/2)^2,
+             3 => dvs_t0[3] * π * (tube_diam/2)^2,
+             4 => dvs_t0[4] * π * (tube_diam/2)^2)
+t0s = Dict(1 => t0_dt + Dates.Second(floor(Int64, dv_t0[1] / Q[1])),
+            2 => t0_dt + Dates.Second(floor(Int64, dv_t0[2] / Q[2])),
+            3 => t0_dt + Dates.Second(floor(Int64, dv_t0[3] / Q[3])),
+            4 => t0_dt + Dates.Second(floor(Int64, dv_t0[4] / Q[4])))
+# calculate the start and end
+column = convert.(Int64,df[!,"column"])
+start_times_dict = Dict(1 => [Dates.value(Dates.Second(t - t0s[1])) for t in start_time[column .== 1]],
+                        2 => [Dates.value(Dates.Second(t - t0s[2])) for t in start_time[column .== 2]],
+                        3 => [Dates.value(Dates.Second(t - t0s[3])) for t in start_time[column .== 3]],
+                        4 => [Dates.value(Dates.Second(t - t0s[4])) for t in start_time[column .== 4]])
+end_times_dict = Dict(1 => [Dates.value(Dates.Second(t - t0s[1])) for t in end_time[column .== 1]],
+                      2 => [Dates.value(Dates.Second(t - t0s[2])) for t in end_time[column .== 2]],
+                      3 => [Dates.value(Dates.Second(t - t0s[3])) for t in end_time[column .== 3]],
+                      4 => [Dates.value(Dates.Second(t - t0s[4])) for t in end_time[column .== 4]])
+# save the flow rate data to a file
+Qs = Dict(1 => Q[column .== 1],
+          2 => Q[column .== 2],
+          3 => Q[column .== 3],
+          4 => Q[column .== 4])
+avg_times_dict = Dict(1 => (start_times_dict[1] .+ end_times_dict[1]) ./ 2 .- dv[1] ./ Qs[1],
+    2 => (start_times_dict[2] .+ end_times_dict[2]) ./ 2 .- dv[2] ./ Qs[2],
+    3 => (start_times_dict[3] .+ end_times_dict[3]) ./ 2 .- dv[3] ./ Qs[3],
+    4 => (start_times_dict[4] .+ end_times_dict[4]) ./ 2 .- dv[4] ./ Qs[4]
+)
 
-for i in eachindex(avg_time)
-    avg_time[i] -= dv[column[i]] / flow_rates[column[i]](avg_time[i]) # subtract the dead time
-end
+flow_rate_data = Dict("Qs" => Qs, "start_times_dict" => start_times_dict, "end_times_dict" => end_times_dict)
+save("data/br_flow_rate.jld2", flow_rate_data)
 
+Br = df[!,"Br-"] # concentration in mM
+## calculate the dead times to correct the start and end times.
+
+Br_dict = Dict(1 => Br[column .== 1],
+          2 => Br[column .== 2],
+          3 => Br[column .== 3],
+          4 => Br[column .== 4])
+# Now fix the is missing values in Br (check the missing value in each column and fix also the avg time dict)
+Br_ = Dict{Int64, Vector{Float64}}(1 => Br_dict[1][.!ismissing.(Br_dict[1])],
+          2 => Br_dict[2][.!ismissing.(Br_dict[2])],
+          3 => Br_dict[3][.!ismissing.(Br_dict[3])],
+          4 => Br_dict[4][.!ismissing.(Br_dict[4])])
+avg_time = Dict{Int64, Vector{Float64}}(1 => avg_times_dict[1][.!ismissing.(Br_dict[1])],
+          2 => avg_times_dict[2][.!ismissing.(Br_dict[2])],
+          3 => avg_times_dict[3][.!ismissing.(Br_dict[3])],
+          4 => avg_times_dict[4][.!ismissing.(Br_dict[4])])
+# Now we have the Br and avg_time dictionaries with the missing values removed.
 # Ok now we are ready to create the datasets per column
-dfs = Dict{Int64, DataFrame}()
-missing_indices = findall(ismissing, Br)
-Br = Br[1:end .!= missing_indices]
-Br[Br .>= 1] .= 1.0
-avg_time = avg_time[1:end .!= missing_indices]
-column = column[1:end .!= missing_indices]
-for col in 1:4
-    # create a DataFrame for the column. Make types concrete and skip missing Br values
-    
-    avg_time_col = avg_time[column .== col]
-    # create a DataFrame with the average time and the Br values for the column
-    dfs[col] = DataFrame(
-        time = avg_time[column .== col],
-        Br = Br[column .== col],
-    )
-end
 
 # Now we can plot the data
 fig = Figure()
@@ -126,10 +111,11 @@ ax = Axis(fig[1, 1],
     title = "Bromide breakthrough curves")
 for col in 1:4
     # get the data for the column
-    df = dfs[col]
+    Br_col = Br_[col]
+    avg_time_col = avg_time[col]
     # plot the data
     #lines!(ax, df.time, df.Br, label = "Column $col")
-    scatter!(ax, df.time, df.Br, label = "Column $col")
+    scatter!(ax, avg_time_col, Br_col, label = "Column $col")
 end
 # add a legend
 axislegend(ax, position = :lt, framevisible = false)
@@ -137,99 +123,8 @@ fig
 # save the figure
 save("plots/br_breakthrough_data.png", fig)
 
-dfs.keys # check the keys of the dictionary
-#change the keys to strings
-dfs = Dict{String, DataFrame}(string(k) => v for (k, v) in pairs(dfs))
+
 # save the datasets to a file
-save("data/br_breakthrough_data.jld2", dfs)
 
-"""
-constant_injection(cr, x, t, c0, c_in, v, Dl)
+save("data/br_breakthrough_data.jld2", Dict("Br" => Br_, "avg_time" => avg_time))
 
-Calculates the concentration profile of a solute undergoing
-advection-dispersion transport in a porous 1D domain with constant
- in a 1D domain with constant injection
-Original reference: (Ogata & Banks, 1961): 
-Appelo, C.A.J.; Postma, Dieke. Geochemistry, Groundwater and Pollution (p. 104).
-
-# Arguments
-- `cr::Matrix`: A 2D array to store the concentration profile of a solute. 
-    first dimension is time and second dimension is space.
-- `x::Vector`: A 1D array of spatial locations. (Where to sample the concentration)
-- `t::Vector`: A 1D array of time locations. (When to sample the concentration)
-- `c0::Real`: The concentratio at x=0 (inflow concentration).
-- `c_in::Real`: The initial concentration in the column (t=0).
-- `v::Real`: The velocity of the solute.
-- `Dl::Real`: The longitudinal dispersion coefficient.
-# Returns
-    nothing, the results are stored in the `cr` array. 
-"""
-function constant_injection!(
-     cr::Matrix,
-     x::Vector,
-     t::Vector,
-     c0::Real,
-     c_in::Real,
-     v::Real,
-     Dl::Real,
-     )
-    
-    for i in eachindex(x)
-        cr[:, i] .= c_in .+ (c0 - c_in) / 2 .* erfc.((x[i] .- v .* t)
-         ./ (2 .* sqrt.(Dl .* t)))
-    end
-    return nothing
-end
-
-Q = 21 # μL/min - imprecise
-avg_q = Q*1e-3 / 60 # cm3/s
-d = 3.5 # cm
-A = π * (d/2)^2 # cm2
-L = 8 # cm
-x = [L/100,]
-t = collect(0:360:(36*3600))
-cr = zeros(length(t), length(x))
-
-ϕ₀ = 0.37 # porosity
-L/100/(avg_q/A/ϕ₀/100)
-αₗ = 1e-3 # m
-D = 2e-9 * ϕ₀ # m2/s
-q = avg_q/A/100 # m/s
-v = q/ϕ₀ # m/s
-dv0 = 100*π*0.152^2/4 #cm3
-p = [ϕ₀, αₗ]
-# function cost(p)
-#     q_red, αₗ = p
-#     v = q*q_red/ϕ₀
-#     # dt = dv/avg_q # in s 
-#     De = αₗ*v .+ D
-#     c_in = 440
-#     c0 = maximum(ec)
-#     cr = zeros(length(t_model), length(x))
-#     # t_model_fun = ifelse.(t_model.-dt .< 0, repeat([0.], length(t_model)), t_model.-dt)
-#     constant_injection!(cr, x, t_model, c0, c_in, v, De)
-#     return sum(abs2,(ec-cr[:, end]))
-# end
-
-# cost(p)
-
-# using PRIMA
-# xl = [0.4, 1e-8]
-# up = [1, 1e-1]
-# res = bobyqa(cost, p, xl=xl, xu=up, rhobeg = 1e-1)
-# p = res[1]
-ϕ, αₗ = p
-v = q/ϕ
-De = αₗ*v .+ D
-c_in = 1e-9
-c0 = 1e-3
-constant_injection!(cr, x, t, c0, c_in, v, De)
-fig = Figure()
-ax = Axis(fig[1, 1],
-    xlabel = "Time [hr]",
-    ylabel = "Br⁻ [mol/L]",
-    title = "Bromide breakthrough fit")
-lines!(ax, t./3600, cr[:, end], color = :blue)
-# scatter!(ax, t, ec, color = :red)
-fig
-# save("plots/porosity_fit.png", fig)

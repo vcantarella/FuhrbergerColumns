@@ -110,25 +110,25 @@ for i in 1:4
     if i == 3 || i == 4
         c_lac = 0.33e-3 # concentration of NO3- in the input solution for columns 3 and 4 [mM]
     end
-    cins = [[c_no3, 0.0, c_so4, c_fe, c_lac],]
+    cins = [[c_no3, 1e-12, c_so4, c_fe, c_lac, c_no3, 0.0],]
     t0s = []
     if i == 3 || i == 4
         # For columns 3 and 4, we have a switch in the lactate concentration
-        push!(cins, [c_no3, 0.0, c_so4, c_fe, c_lac_3_4_switch, c_no3])
+        push!(cins, [c_no3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3, 0.0])
         push!(t0s, t_s_34_s) # convert days to seconds
-        push!(cins, [c_no3_all_1*1e-3, 0.0, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_1*1e-3])
+        push!(cins, [c_no3_all_1*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_1*1e-3, 0.0])
         push!(t0s, t_1_s) # convert days to seconds
-        push!(cins, [c_no3_all_2*1e-3, 0.0, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_2*1e-3])
+        push!(cins, [c_no3_all_2*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_2*1e-3, 0.0])
         push!(t0s, t_2_s) # convert days to seconds
-        push!(cins, [c_no3_4mM*1e-3, 0.0, c_so4, c_fe, c_lac_3_4_switch, c_no3_4mM*1e-3])
+        push!(cins, [c_no3_4mM*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_4mM*1e-3, 0.0])
         push!(t0s, t_4_s) # convert days to seconds
     else
         # For columns 1 and 2, we have a switch in the NO3-
-        push!(cins, [c_no3_all_1*1e-3, 0.0, c_so4, c_fe, c_lac, c_no3_all_1*1e-3])
+        push!(cins, [c_no3_all_1*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_all_1*1e-3, 0.0])
         push!(t0s, t_1_s) # convert days to seconds
-        push!(cins, [c_no3_all_2*1e-3, 0.0, c_so4, c_fe, c_lac, c_no3_all_2*1e-3])
+        push!(cins, [c_no3_all_2*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_all_2*1e-3, 0.0])
         push!(t0s, t_2_s) # convert days to seconds
-        push!(cins, [c_no3_4mM*1e-3, 0.0, c_so4, c_fe, c_lac, c_no3_4mM*1e-3])
+        push!(cins, [c_no3_4mM*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_4mM*1e-3, 0.0])
         push!(t0s, t_4_s) # convert days to seconds
     end
     t0s = Dates.value.(t0s) # convert to seconds
@@ -151,11 +151,14 @@ Deff = [
 gs = @SVector [160.16,437.13,-150]
 function reactive_transport_builder(flow_data::TData, cin_data::CinData, Deff, dx, ϕ, ρₛ, gs)
     vs = SVector{length(flow_data.v)}(flow_data.v)
+    v = mean(vs) # average velocity
     Des = SVector{length(flow_data.De)}(flow_data.De)
+    DD = mean(Des) # average dispersion coefficient
     end_times = SVector{length(flow_data.end_times)}(flow_data.end_times)
     c_ins = SVector{length(cin_data.c_in)}(cin_data.c_in)
     t_ins = SVector{length(cin_data.t_in)}(cin_data.t_in)
     De_work = Vector{Float64}(undef, length(Deff))
+    De_v2 = Deff .+ DD
     function dynamic_transport(t, De, Deff=Deff)
         for i in eachindex(vs)
             if t <= end_times[i]
@@ -192,12 +195,12 @@ function reactive_transport_builder(flow_data::TData, cin_data::CinData, Deff, d
             fe2_ = @view u[:,4]
             lac_ = @view u[:,5]
             no3t_ = @view u[:,6]  # NO3- tracer
-            b = @view u[:,7]  # biomass active fraction (immobile))
-            b_in = @view u[:,8]  # biomass inactive fraction (immobile)
+            cd = @view u[:,7]  # NO3- tracer concentration
+            b = @view u[:,8]  # biomass active fraction (immobile))
+            #b_in = @view u[:,8]  # biomass inactive fraction (immobile)
 
             # unpack the parameters
-            r_no3, r_no2, r_so4, k_act, G₀, GcdG₀, K_no3, K_no2, K_so4 = p
-            st = 0.1
+            μ₁, μ₂, αₑ, k_dec, Ya1, Ya2, Yd1, Yd2, Ka1, Ka2, Kd, Kb = p
 
             n_rows = size(u, 1)
             @inline c_in = dynamic_c_in(t)
@@ -230,22 +233,26 @@ function reactive_transport_builder(flow_data::TData, cin_data::CinData, Deff, d
             end
             @inbounds for k in 1:n_rows
                 # Calculate each term once to avoid repeated computation
-                r_no3b = r_no3 * no3_[k] / (K_no3 + no3_[k])
-                r_no2b = r_no2 * no2_[k] / (K_no2 + no2_[k])
-                r_so4b = r_so4 * so4_[k] / (K_so4 + so4_[k])
-                expo = expo_fun(gs, G₀, GcdG₀, r_no3b, r_no2b, r_so4b)
-                θ = 1 / (1 + exp(1/st*expo))  # Activation function
-                r_act = k_act * θ * b_in[k]
-                r_ina = k_act * (1 - θ) * b[k]
-                
-                # Update state variables
-                du[k,1] -= mult_term*r_no3b*b[k]
-                du[k,2] += mult_term*(r_no3 - r_no2)*b[k]
-                du[k,3] -= mult_term*r_so4b*b[k]
+                # γ = αₑ/(b[k]+Kb)*(μ₁/Yd1*no3_[k]/(Ka1 + no3_[k]) + μ₂/Yd2*no2_[k]/(Ka2 + no2_[k]))^(-1)
+                # γ = ifelse(γ ≥ 0.9, .9, γ)  # Limit γ to 1
+                cd_r = cd[k] / (cd[k] + Kd)
+                ca1_r = no3_[k] / (no3_[k] + Ka1)
+                ca2_r = no2_[k] / (no2_[k] + Ka2)
+                r_no3b = μ₁/Ya1 * ca1_r * cd_r
+                r_no2b = μ₂/Ya2 * ca2_r * cd_r
+                r_b = ((μ₁ * ca1_r + 
+                    μ₂ * ca2_r) * cd_r - k_dec) * b[k]  # Decay term
+                r_cd = αₑ * b[k] / (b[k] + Kb) -  μ₁/Yd1*ca1_r * cd_r - μ₂/Yd2*ca2_r * cd_r
+                    # Update state variables
+                du[k,1] -= r_no3b*b[k]
+                du[k,2] += (r_no3b - r_no2b)*b[k]
+                # du[k,3] -= mult_term*r_so4b*b[k]
                 # du[k,4] += mult_term*r_no2b*b
                 # du[k,5] -= mult_term*r_no2b*b
-                du[k,7] = r_act - r_ina  # biomass active fraction
-                du[k,8] = r_ina - r_act  # biomass inactive fraction
+
+                du[k,7] += r_cd  # biomass active fraction
+                du[k,8] = r_b  # biomass inactive fraction
+                # du[k,8] += r_ina - r_act  # biomass inactive fraction
             end
         end
     return rhs!
@@ -257,21 +264,30 @@ dx = 0.0005 # Spatial step size
 L = 0.08 #m (8 cm)  # Spatial locations
 x = range(0+dx/2, stop=L-dx/2, step=dx)  # Spatial locations
 rhs! = reactive_transport_builder(qvec[1], c_ins[1], Deff, dx, tracer_params[1][1], 2.65, gs)
+γa = 1/25 # stoichiometric coefficient of e-acceptor in the anabolic rctieaction
+γc1 = 4/2 # stoichiometric coefficient of e-acceptor in the catabolic rea
+γc2 = 4/3 # stoichiometric coefficient of e-acceptor in the catabolic rea
+Yd = 0.3 # yield of biomass from the catabolic reaction
 p0 = [
-    1e-7,
-    1e-7,
-    1e-8,
-    .01/3600,
-    0.34/3600,
-    20/(0.34/3600),
+    1e-5, # μ₁ (growth rate for NO3-)
+    5e-6, # μ₂ (growth rate for NO2-)
+    8e-10, # αₑ (effective diffusion coefficient)
+    1.15e-6, # k_dec (decay rate)
+    1/((1/Yd-1)*γc1),
+    1/((1/Yd-1)*γc2),
+    Yd,
+    Yd,
+    5e-4,
+    5e-4,
     1e-6,
-    1e-6,
-    1e-6 # r_no3, r_no2, r_so4, k_act, G₀, GcdG₀, K_no3, K_no2, K_so4
+    5e-5
 ]
 
 u0 = zeros(length(x), 8) # 5 mobile components + 2 immobile components (active and inactive biomass)
-u0[:,8] .= 1e-6 # Initial concentration of inactive biomass
-du0 = copy(u0) # Initialize the derivative array
+# u0[:,1] .= 1e-12 # Initial concentration of NO3-
+# u0[:,2] .= 1e-12 # Initial concentration of NO2-
+u0[:,8] .= 1e-7 # Initial concentration of inactive biomass
+du0 = copy(zeros(size(u0))) # Initialize the derivative array
 
 rhs!(du0, u0, p0, 0.0) # Calculate the initial derivative
 # @time rhs!(du0, u0, p0, 0.0) # Benchmark the RHS function
@@ -295,11 +311,12 @@ fastprob = ODEProblem(fixed_rhs!, u0, tspan, p0)
 # defining points to stop
 tstops = vcat(qvec[1].end_times, c_ins[1].t_in)
 sort!(tstops) # sort the times
-sol = solve(fastprob, FBDF(), abstol = 1e-10, reltol = 1e-10,
-    maxiters = 10000,
+sol = solve(fastprob, FBDF(nlsolve=NLNewton(max_iter = 100)), abstol = 1e-8, reltol = 1e-8,
+    maxiters = 100000,
     tstops = tstops,
+    d_discontinuities = tstops,
     )
-
+sol.t
 # Check model outflow:
 no3_out = [sol.u[i][end, 1] for i in eachindex(sol.t)]
 no2_out = [sol.u[i][end, 2] for i in eachindex(sol.t)]
@@ -313,11 +330,11 @@ ax = Axis(fig[1, 1], title = "Outflow concentrations",
     xlabel = "Time (days)", ylabel = "Concentration (M)")
 plot_t = sol.t ./ (24*60*60) # convert seconds to days
 lines!(ax, plot_t, no3_out, label = "NO3- outflow", color = :blue)
-lines!(ax, plot_t, tracer_out, label = "NO3- tracer outflow", color = :purple)
+lines!(ax, plot_t, tracer_out, label = "NO3- tracer outflow", color = :blue, linestyle = :dash)
 lines!(ax, plot_t, no2_out, label = "NO2- outflow", color = :orange)
 lines!(ax, plot_t, so4_out, label = "SO4-2 outflow", color = :green)
 lines!(ax, plot_t, lac_out, label = "Lactate outflow", color = :red)
-axislegend(ax, position = :rt)
+axislegend(ax, position = :lt)
 fig
 
 # Plot alive vs inactive biomass
@@ -325,8 +342,8 @@ fig2 = Figure()
 ax2 = Axis(fig2[1, 1], title = "Biomass concentrations",
     xlabel = "length (m)", ylabel = "Concentration (M)")
 plot_x = x ./ 0.01 # convert cm to m
-lines!(ax2, plot_x, sol.u[end][:, 6], label = "Active biomass", color = :blue)
-lines!(ax2, plot_x, sol.u[end][:, 7], label = "Inactive biomass", color = :orange)
+lines!(ax2, plot_x, sol.u[end][:, 7], label = "Active biomass", color = :blue)
+#lines!(ax2, plot_x, sol.u[end][:, 7], label = "Inactive biomass", color = :orange)
 axislegend(ax2, position = :rt)
 fig2
 #Dead volumes per column

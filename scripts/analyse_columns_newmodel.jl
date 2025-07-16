@@ -30,6 +30,18 @@ t0_arr = [ifelse(col == 1 || col == 2, t0_1_2, t0_3_4) for col in df[!,"column"]
 start_time_s = Dates.Second.(start_time - t0_arr)
 end_time_s = Dates.Second.(end_time - t0_arr)
 
+# Moment when pumps 1 and 2 stopped due to clogging.
+t_stop_1 = DateTime(2025,05,28, 19, 50)
+t_stop_2 = DateTime(2025,05,28, 20,10)
+# moment when the pumps were restarted
+t_restart_1_2 = DateTime(2025,05,29, 08, 45)
+# Approximate time when all pumps stoppeds due to energie failure in the building
+t_stop_all = DateTime(2025,05,29, 12, 30)
+t_stop_s = Dates.Second(t_stop_all - t0_1_2)
+# Moment when the pumps were restarted after the energy failure
+t_restart_all = DateTime(2025,05,29, 18, 16)
+t_restart_s = Dates.Second(t_restart_all - t0_1_2)
+
 # import transport parameters
 transp_params = load("data/optimized_tracer_params.jld2")
 tracer_params = transp_params["tracer_params"]
@@ -63,6 +75,48 @@ struct CinData{QT, T}
     c_in::QT # inflow concentration in mM
     t_in::T # time of the inflow concentration
 end
+
+struct QData{QT, T}
+    column::Int64
+    Q::QT # flow velocity in m/s
+    end_times::T
+end
+flowvec = QData[]
+
+for i in 1:4
+    # only the values where there are no missing values in the flow rate
+    bool_index = (.!ismissing.(df[:, "Q"])) .& (df[!,"column"] .== i)
+    # convert the flow rate to μL/min
+    Q = df[bool_index,"Q"] ./ 60 .* 1e-9 # convert from μL/min to m3/s
+    # create a QData object and push it to the vector
+    push!(flowvec, QData(i, Q, Dates.value.(end_time_s[bool_index])))
+end
+
+
+function flow_function(t, Qs, end_times)
+    for i in eachindex(Qs)
+        if t <= end_times[i]
+            return Qs[i]   # This should be inside the if block
+        end
+    end
+    return Qs[end]
+end
+
+dvs_t0 = Dict(1 => 66,
+              2 => 40+57,
+              3 => 41+38,
+              4 => 41+38.5) # in cm
+tube_diam = 1.52e-3 # m
+dead_t0 = Dict(1 => dvs_t0[1]*0.01 * π * (tube_diam/2)^2,
+             2 => dvs_t0[2]*0.01 * π * (tube_diam/2)^2,
+             3 => dvs_t0[3]*0.01 * π * (tube_diam/2)^2,
+             4 => dvs_t0[4]*0.01 * π * (tube_diam/2)^2) #dead volume in m3
+# First we have to correct the t0, because it is actually after the dvs_t0.
+t0sdict = Dict(1 => t0_1_2 + Dates.Second(round(dvs_t0[1] / 100 * tube_diam^2 * π / 4 / flow_function(0, flowvec[1].Q, qvec[1].end_times))),
+            2 => t0_1_2 + Dates.Second(round(dvs_t0[2] / 100 * tube_diam^2 * π / 4 / flow_function(0, flowvec[2].Q, qvec[2].end_times))),
+            3 => t0_3_4 + Dates.Second(round(dvs_t0[3] / 100 * tube_diam^2 * π / 4 / flow_function(0, flowvec[3].Q, qvec[3].end_times))),
+            4 => t0_3_4 + Dates.Second(round(dvs_t0[4] / 100 * tube_diam^2 * π / 4 / flow_function(0, flowvec[4].Q, qvec[4].end_times))))
+
 
 
 ## Events:
@@ -115,21 +169,28 @@ for i in 1:4
     if i == 3 || i == 4
         # For columns 3 and 4, we have a switch in the lactate concentration
         push!(cins, [c_no3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3])
-        push!(t0s, t_s_34_s) # convert days to seconds
+        t_lac = Dates.value(Dates.Second(t_switch_3_4 - t0sdict[i])) # convert days to seconds
+        push!(t0s, t_lac + dead_t0[i] / flow_function(t_lac, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
+        t_1 = Dates.value(Dates.Second(t_switch_all_1 - t0sdict[i])) # convert days to seconds
         push!(cins, [c_no3_all_1*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_1*1e-3])
-        push!(t0s, t_1_s) # convert days to seconds
+        push!(t0s, t_1 + dead_t0[i] / flow_function(t_1, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
         push!(cins, [c_no3_all_2*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_2*1e-3])
-        push!(t0s, t_2_s) # convert days to seconds
+        t_2 = Dates.value(Dates.Second(t_switch_all_2 - t0sdict[i])) # convert days to seconds
+        push!(t0s, t_2 + dead_t0[i] / flow_function(t_2, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
         push!(cins, [c_no3_4mM*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_4mM*1e-3])
-        push!(t0s, t_4_s) # convert days to seconds
+        t_4 = Dates.value(Dates.Second(t_switch_4mM - t0sdict[i])) # convert days to seconds
+        push!(t0s, t_4 + dead_t0[i] / flow_function(t_4, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
     else
         # For columns 1 and 2, we have a switch in the NO3-
         push!(cins, [c_no3_all_1*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_all_1*1e-3])
-        push!(t0s, t_1_s) # convert days to seconds
+        t_1 = Dates.value(Dates.Second(t_switch_all_1 - t0sdict[i])) # convert days to seconds
+        push!(t0s, t_1 + dead_t0[i] / flow_function(t_1, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
         push!(cins, [c_no3_all_2*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_all_2*1e-3])
-        push!(t0s, t_2_s) # convert days to seconds
+        t_2 = Dates.value(Dates.Second(t_switch_all_2 - t0sdict[i])) # convert days to seconds
+        push!(t0s, t_2 + dead_t0[i] / flow_function(t_2, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
         push!(cins, [c_no3_4mM*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_4mM*1e-3])
-        push!(t0s, t_4_s) # convert days to seconds
+        t_4 = Dates.value(Dates.Second(t_switch_4mM - t0sdict[i])) # convert days to seconds
+        push!(t0s, t_4 + dead_t0[i] / flow_function(t_4, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
     end
     t0s = Dates.value.(t0s) # convert to seconds
     # Add the initial concentration at t0
@@ -349,14 +410,14 @@ dvs_t0 = Dict(1 => 66,
               4 => 41+38.5) # in cm
 tube_diam = 0.152 # cm
 # Dead volume in cm3
-dv = Dict(1 => dvs[1] * π * (tube_diam/2)^2,
-          2 => dvs[2] * π * (tube_diam/2)^2,
-          3 => dvs[3] * π * (tube_diam/2)^2,
-          4 => dvs[4] * π * (tube_diam/2)^2)
-dv_t0 = Dict(1 => dvs_t0[1] * π * (tube_diam/2)^2,
-             2 => dvs_t0[2] * π * (tube_diam/2)^2,
-             3 => dvs_t0[3] * π * (tube_diam/2)^2,
-             4 => dvs_t0[4] * π * (tube_diam/2)^2)
+dv = Dict(1 => dvs[1] * A,
+          2 => dvs[2] * A,
+          3 => dvs[3] * A,
+          4 => dvs[4] * A)
+dv_t0 = Dict(1 => dvs_t0[1] * A,
+             2 => dvs_t0[2] * A,
+             3 => dvs_t0[3] * A,
+             4 => dvs_t0[4] * A)
 t0s = Dict(1 => t0_dt + Dates.Second(floor(Int64, dv_t0[1] / Q[1])),
             2 => t0_dt + Dates.Second(floor(Int64, dv_t0[2] / Q[2])),
             3 => t0_dt + Dates.Second(floor(Int64, dv_t0[3] / Q[3])),

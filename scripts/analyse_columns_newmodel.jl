@@ -64,10 +64,15 @@ for i in 1:4
     bool_index = (.!ismissing.(df[:, "Q"])) .& (df[!,"column"] .== i)
     # convert the flow rate to μL/min
     Q = df[bool_index,"Q"] ./ 60 .* 1e-9 # convert from μL/min to m3/s
+    local end_times = end_time_s[bool_index] # end times in seconds
+    # check when the flow rate was 0
+    ind = findlast(end_times .< t_stop_s)
+    Q = vcat(Q[1:ind],[0.],Q[ind+1:end]) # take only the values before the stop
+    end_times = vcat(end_times[1:ind], [t_stop_s], end_times[ind+1:end]) # add the stop time
     v = Q./(ϕ * A) # flow velocity in m/s
     De = v .* αₗ # longitudinal dispersion coefficient in m2/s
     # create a QData object and push it to the vector
-    push!(qvec, TData(i, v, De, Dates.value.(end_time_s[bool_index])))
+    push!(qvec, TData(i, v, De, Dates.value.(end_times)))
 end
 
 struct CinData{QT, T}
@@ -170,29 +175,29 @@ for i in 1:4
         # For columns 3 and 4, we have a switch in the lactate concentration
         push!(cins, [c_no3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3])
         t_lac = Dates.value(Dates.Second(t_switch_3_4 - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_lac + dead_t0[i] / flow_function(t_lac, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
+        push!(t0s, t_lac + dead_t0[i] / flow_function(t_lac, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
         t_1 = Dates.value(Dates.Second(t_switch_all_1 - t0sdict[i])) # convert days to seconds
         push!(cins, [c_no3_all_1*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_1*1e-3])
-        push!(t0s, t_1 + dead_t0[i] / flow_function(t_1, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
+        push!(t0s, t_1 + dead_t0[i] / flow_function(t_1, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
         push!(cins, [c_no3_all_2*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_2*1e-3])
         t_2 = Dates.value(Dates.Second(t_switch_all_2 - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_2 + dead_t0[i] / flow_function(t_2, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
+        push!(t0s, t_2 + dead_t0[i] / flow_function(t_2, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
         push!(cins, [c_no3_4mM*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_4mM*1e-3])
         t_4 = Dates.value(Dates.Second(t_switch_4mM - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_4 + dead_t0[i] / flow_function(t_4, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
+        push!(t0s, t_4 + dead_t0[i] / flow_function(t_4, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
     else
         # For columns 1 and 2, we have a switch in the NO3-
         push!(cins, [c_no3_all_1*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_all_1*1e-3])
         t_1 = Dates.value(Dates.Second(t_switch_all_1 - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_1 + dead_t0[i] / flow_function(t_1, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
+        push!(t0s, t_1 + dead_t0[i] / flow_function(t_1, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
         push!(cins, [c_no3_all_2*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_all_2*1e-3])
         t_2 = Dates.value(Dates.Second(t_switch_all_2 - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_2 + dead_t0[i] / flow_function(t_2, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
+        push!(t0s, t_2 + dead_t0[i] / flow_function(t_2, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
         push!(cins, [c_no3_4mM*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_4mM*1e-3])
         t_4 = Dates.value(Dates.Second(t_switch_4mM - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_4 + dead_t0[i] / flow_function(t_4, flowvec[i].Q, flowvec[i].endtimes)) # convert days to seconds
+        push!(t0s, t_4 + dead_t0[i] / flow_function(t_4, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
     end
-    t0s = Dates.value.(t0s) # convert to seconds
+    t0s = convert.(Float64, t0s) # convert to seconds
     # Add the initial concentration at t0
     cindata = CinData(i, cins, t0s)
     push!(c_ins, cindata)
@@ -324,8 +329,8 @@ rhs! = reactive_transport_builder(qvec[1], c_ins[1], Deff, dx, tracer_params[1][
 Yd = 0.3 # yield of biomass from the catabolic reaction
 p0 = [
     3e-5, # μ₁ (growth rate for NO3-)
-    1e-5, # μ₂ (growth rate for NO2-)
-    1e-7, # αₑ (effective diffusion coefficient)
+    3e-5, # μ₂ (growth rate for NO2-)
+    4e-7, # αₑ (effective diffusion coefficient)
     1.15e-6, # k_dec (decay rate)
     1/((1/Yd-1)*γc1),
     1/((1/Yd-1)*γc2),
@@ -333,7 +338,7 @@ p0 = [
     Yd,
     5e-4,
     5e-4,
-    5e-4
+    1e-3
 ]
 
 u0 = zeros(length(x), 7) # 5 mobile components + 2 immobile components (active and inactive biomass)
@@ -364,7 +369,7 @@ fastprob = ODEProblem(fixed_rhs!, u0, tspan, p0)
 # defining points to stop
 tstops = vcat(qvec[1].end_times, c_ins[1].t_in)
 sort!(tstops) # sort the times
-sol = solve(fastprob, FBDF(), abstol = 1e-8, reltol = 1e-8,
+sol = solve(fastprob, FBDF(), abstol = 1e-10, reltol = 1e-10,
     maxiters = 10000,
     tstops = tstops,
     d_discontinuities = tstops,
@@ -377,6 +382,27 @@ so4_out = [sol.u[i][end, 3] for i in eachindex(sol.t)]
 lac_out = [sol.u[i][end, 5] for i in eachindex(sol.t)]
 tracer_out = [sol.u[i][end, 6] for i in eachindex(sol.t)]
 
+
+struct conc_ds{C, T}
+    conc::C # concentration in mM
+    t::T # time in seconds since t0
+    conc_ds(conc::C, t::T) where {C,T} = size(conc) == size(t) ? new{C,T}(conc, t) : error("Size mismatch between concentration and time")
+end
+
+struct ds{I, D}
+    column::I
+    no3::D
+    no2::D
+    so4::D
+    fe::D
+    pH::D
+    ec::D
+end
+# check the outflow data
+ods = load("data/outflow_dataset.jld2")
+col1 = ods["1"]
+no2 = col1.no2
+no3 = col1.no3
 # Plot results
 fig = Figure()
 ax = Axis(fig[1, 1], title = "Outflow concentrations",
@@ -387,8 +413,11 @@ lines!(ax, plot_t, tracer_out, label = "NO3- tracer outflow", color = :blue, lin
 lines!(ax, plot_t, no2_out, label = "NO2- outflow", color = :orange)
 lines!(ax, plot_t, so4_out, label = "SO4-2 outflow", color = :green)
 lines!(ax, plot_t, lac_out, label = "Lactate outflow", color = :red)
+scatter!(ax, no2.t ./ (24*60*60), no2.conc*1e-6, label = "Measured NO2- outflow", color = :orange, markersize = 8)
+scatter!(ax, no3.t ./ (24*60*60), no3.conc*1e-6, label = "Measured NO3- outflow", color = :blue, markersize = 8)
 axislegend(ax, position = :lt)
 fig
+save("outflow_concentrations.png", fig, px_per_unit = 2.0)
 
 # Plot alive vs inactive biomass
 fig2 = Figure()

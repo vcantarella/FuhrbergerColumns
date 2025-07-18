@@ -217,6 +217,7 @@ for column in [1, 2, 3, 4]
 end
 axislegend(large_ax, position = :lt, "Columns")
 large_fig
+save("plots/br_breakthrough_fit.png", large_fig)
 
 # Save the parameters
 save("data/optimized_tracer_params.jld2", "tracer_params", ps)

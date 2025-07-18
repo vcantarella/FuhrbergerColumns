@@ -2,7 +2,7 @@ using DrWatson
 using DataFrames, XLSX, Statistics
 using Dates
 using StaticArrays
-
+include("model_data_structures.jl")
 # load analytical data
 file_path = datadir("exp_raw", "no2_analyticall_results.xlsx")
 sheet_name = "sampling"
@@ -41,10 +41,7 @@ t0sdict = Dict(1 => t0_1_2 + Dates.Second(round(dvs_t0[1] / 100 * tube_diam^2 * 
 
 
 # Now we have the t0 reference for the discharge data.
-struct QData{QT, T}
-    Q::QT # flow velocity in m/s
-    end_times::T
-end
+
 disch_ds = Dict()
 for i in 1:4
     # only the values where there are no missing values in the flow rate
@@ -97,10 +94,7 @@ tracer_params = transp_params["tracer_params"]
 # Generate the transport dataset for each column
 # Q is the flow rate in μL/min for each column
 # And we calculate the v and αₗ*v that are dependent on the current Q
-struct VData{QT, T}
-    v::QT # flow velocity in m/s
-    end_times::T
-end
+
 
 v_ds = Dict{Int, VData}()
 D = 3.5*1e-2 #cm to m diameter of the column
@@ -135,16 +129,12 @@ for i in 1:4
     Q = vcat(Q[1:ind],[Q[ind], 0.],Q[ind+1:end]) # take only the values before the stop
     end_times = vcat(end_times[1:ind], [t_stop_s, t_restart_s], end_times[ind+1:end]) # add the stop time
     v = Q./(ϕ * A) # flow velocity in m/s
-    De = v .* αₗ # longitudinal dispersion coefficient in m2/s
+    v = convert.(Float64, v) # convert to Float64
+    #De = v .* αₗ # longitudinal dispersion coefficient in m2/s
     # create a QData object and push it to the vector
     v_ds[i] = VData(v, end_times)
 end
 
-struct CinData{QT, T}
-    column::Int64
-    c_in::QT # inflow concentration in mM
-    t_in::T # time of the inflow concentration
-end
 
 
 ## Events:
@@ -163,15 +153,11 @@ c_no3_all_1 = 1.0 # concentration of NO3- in the input solution for all columns 
 # Moment when the increase the NO3- concentration
 t_switch_all_2 = DateTime(2025, 05, 28, 19, 15, 0)
 c_no3_all_2 = 2.0 # concentration of NO3- in the input solution for all columns after the switch [mM]
-
-
-# TODO:
-
 # Moment when we switch to 4 mM inflow concentration
 t_switch_4mM = DateTime(2025, 06, 03, 18, 25, 0)
 c_no3_4mM = 4.
 
-c_ins = CinData[]
+c_ins = Dict{Int64, CinData}()
 for i in 1:4
     c_no3 = 0.6e-3
     c_lac = 0.0
@@ -181,46 +167,28 @@ for i in 1:4
     if i == 3 || i == 4
         c_lac = 0.33e-3 # concentration of NO3- in the input solution for columns 3 and 4 [mM]
     end
-    cins = [[c_no3, 1e-12, c_so4, c_fe, c_lac],]
+    cins = [[c_no3, 1e-16, c_so4, c_fe, c_lac, c_no3],]
     t0s = []
     if i == 3 || i == 4
         # For columns 3 and 4, we have a switch in the lactate concentration
-        push!(cins, [c_no3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3])
+        push!(cins, [c_no3, 1e-16, c_so4, c_fe, c_lac_3_4_switch, c_no3])
         t_lac = Dates.value(Dates.Second(t_switch_3_4 - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_lac + dead_t0[i] / flow_function(t_lac, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
-        t_1 = Dates.value(Dates.Second(t_switch_all_1 - t0sdict[i])) # convert days to seconds
-        push!(cins, [c_no3_all_1*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_1*1e-3])
-        push!(t0s, t_1 + dead_t0[i] / flow_function(t_1, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
-        push!(cins, [c_no3_all_2*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_2*1e-3])
-        t_2 = Dates.value(Dates.Second(t_switch_all_2 - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_2 + dead_t0[i] / flow_function(t_2, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
-        push!(cins, [c_no3_4mM*1e-3, 1e-12, c_so4, c_fe, c_lac_3_4_switch, c_no3_4mM*1e-3])
-        t_4 = Dates.value(Dates.Second(t_switch_4mM - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_4 + dead_t0[i] / flow_function(t_4, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
-    else
-        # For columns 1 and 2, we have a switch in the NO3-
-        push!(cins, [c_no3_all_1*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_all_1*1e-3])
-        t_1 = Dates.value(Dates.Second(t_switch_all_1 - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_1 + dead_t0[i] / flow_function(t_1, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
-        push!(cins, [c_no3_all_2*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_all_2*1e-3])
-        t_2 = Dates.value(Dates.Second(t_switch_all_2 - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_2 + dead_t0[i] / flow_function(t_2, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
-        push!(cins, [c_no3_4mM*1e-3, 1e-12, c_so4, c_fe, c_lac, c_no3_4mM*1e-3])
-        t_4 = Dates.value(Dates.Second(t_switch_4mM - t0sdict[i])) # convert days to seconds
-        push!(t0s, t_4 + dead_t0[i] / flow_function(t_4, flowvec[i].Q, flowvec[i].end_times)) # convert days to seconds
+        t_lac += dead_t0[i] / disch_function(t_lac, disch_ds[i].Q, disch_ds[i].end_times)
+        push!(t0s, t_lac) # convert days to seconds
     end
+    t_1 = Dates.value(Dates.Second(t_switch_all_1 - t0sdict[i])) # convert days to seconds
+    t_1 += dead_t0[i] / disch_function(t_1, disch_ds[i].Q, disch_ds[i].end_times) # convert days to seconds
+    push!(cins, [c_no3_all_1*1e-3, 1e-16, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_1*1e-3])
+    push!(t0s, t_1) # convert days to seconds
+    push!(cins, [c_no3_all_2*1e-3, 1e-16, c_so4, c_fe, c_lac_3_4_switch, c_no3_all_2*1e-3])
+    t_2 = Dates.value(Dates.Second(t_switch_all_2 - t0sdict[i])) # convert days to seconds
+    t_2 += dead_t0[i] / disch_function(t_2, disch_ds[i].Q, disch_ds[i].end_times) # convert days to seconds
+    push!(t0s, t_2) # convert days to seconds
+    push!(cins, [c_no3_4mM*1e-3, 1e-16, c_so4, c_fe, c_lac_3_4_switch, c_no3_4mM*1e-3])
+    t_4 = Dates.value(Dates.Second(t_switch_4mM - t0sdict[i])) # convert days to seconds
+    t_4 += dead_t0[i] / disch_function(t_4, disch_ds[i].Q, disch_ds[i].end_times) # convert days to seconds
+    push!(t0s, t_4) # convert days to seconds
     t0s = convert.(Float64, t0s) # convert to seconds
     # Add the initial concentration at t0
-    cindata = CinData(i, cins, t0s)
-    push!(c_ins, cindata)
+    c_ins[i] = CinData(cins, t0s)
 end
-
-# Diffusion coefficients for the different (mobile) components
-Deff = [
-    1.0e-9, # NO3-
-    1.0e-9, # NO2-
-    1.0e-9, # SO4-2
-    1.0e-9, # Fe+2
-    1.0e-9, # Lactate
-    1.0e-9, # NO3- (tracer)
-]

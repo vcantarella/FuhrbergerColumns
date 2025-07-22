@@ -9,7 +9,7 @@ using SciMLSensitivity
 using SparseConnectivityTracer
 using Symbolics
 using LinearSolve
-
+using DataInterpolations
 # Data structures used in the model building and simulation
 include("model_data_structures.jl")
 tracer_params = load("data/optimized_tracer_params.jld2") # Load the optimized tracer parameters
@@ -63,6 +63,8 @@ function reactive_transport_builder(v_data::VData, cin_data::CinData, Deff, dx, 
         # Add a fallback return outside the loop
         return vs[end]
     end
+    interp = SmoothedConstantInterpolation(vs, end_times, d_max=300,extrapolation = ExtrapolationType.Constant)
+
     function dynamic_c_in(t, c_ins=c_ins, t_ins=t_ins)
         @inbounds for i in eachindex(t_ins)
             if t <= t_ins[i]
@@ -73,7 +75,7 @@ function reactive_transport_builder(v_data::VData, cin_data::CinData, Deff, dx, 
     end
     function build_rhs(dynamic_transport, dynamic_c_in, dx, Deff, αₗ, De=Des)
         function rhs!(du, u, p, t)
-            @inline v = dynamic_transport(t)
+            @inline v = interp(t)
             De .= Deff .+ αₗ * v
             # unpack the state variables
             no3_ = @view u[:,1]
@@ -87,11 +89,11 @@ function reactive_transport_builder(v_data::VData, cin_data::CinData, Deff, dx, 
 
             # unpack the parameters
             μ₁, μ₂, αₑ, k_dec, Ya1, Ya2, Yd1, Yd2, Ka1, Ka2, Kb,
-            r_so4_max, μₛ, Ks, Ys, Yds, I_no3, I_no2 = p
+            r_so4_max, μₛ, Ks, Ys, Yds, I_no3, I_no2, f = p
 
             n_rows = size(u, 1)
             @inline c_in = dynamic_c_in(t)
-            nmob = size(c_ins, 1)  # Number of mobile components
+            nmob = size(De, 1)  # Number of mobile components
             # transport
             # Calculate transport terms directly without temporary arrays
             @inbounds for j in 1:nmob
@@ -130,13 +132,14 @@ function reactive_transport_builder(v_data::VData, cin_data::CinData, Deff, dx, 
                     μ₂ * no2_[k] / (Ka2 + no2_[k])) * γ - k_dec) * b[k]  # Decay term
                 so4_max = 2.6e-3
                 r_so4 = r_so4_max * (1 - so4_[k]/so4_max) # Sulfate dissolution term
-                r_fe = 1/7 * r_no3b * b[k] + 3/14 * r_no2b * b[k]  # Iron dissolution term
+                r_fe = (1/7 * r_no3b * b[k] + 3/14 * r_no2b * b[k])*f  # Iron dissolution term
+                r_so4n = (2/7 * r_no3b * b[k] + 3/7 * r_no2b * b[k])*f  # Sulfate dissolution term
                 r_s = μₛ/Ys * so4_[k] / (Ks + so4_[k]) * I_no2/(I_no2 + no2_[k]) * I_no3/(I_no3 + no3_[k]) * γₛ  # Sulfate reduction term
                 r_b_s = (r_s-k_dec) * b_s[k]  # Sulfate reduction term for biomass
                 # Update state variables
                 du[k,1] -= r_no3b*b[k]
                 du[k,2] += (r_no3b - r_no2b)*b[k]
-                du[k,3] += r_so4 - r_s * b_s[k]  # sulfate concentration
+                du[k,3] += r_so4 - r_s * b_s[k] + r_so4n  # sulfate concentration
                 du[k,4] += r_fe
                 # du[k,5] -= mult_term*r_no2b*b
                 du[k,7] = r_b  # biomass active fraction
@@ -156,6 +159,7 @@ L = 0.08 #m (8 cm)  # Spatial locations
 x = range(0+dx/2, stop=L-dx/2, step=dx)  # Spatial locations
 rhs! = reactive_transport_builder(v_ds[1], c_ins[1], Deff, dx, tracer_params[1][1],
     tracer_params[1][2], 2.65)
+
 γa = 1/25 # stoichiometric coefficient of e-acceptor in the anabolic rctieaction
 γc1 = 4/2 # stoichiometric coefficient of e-acceptor in the catabolic rea
 γc2 = 4/3 # stoichiometric coefficient of e-acceptor in the catabolic rea
@@ -166,27 +170,26 @@ p0 = [
     3e-5, # μ₂ (growth rate for NO2-)
     4e-7, # αₑ (effective diffusion coefficient)
     1.15e-6, # k_dec (decay rate)
-    1/((1/Yd-1)*γc1),
-    1/((1/Yd-1)*γc2),
-    Yd,
-    Yd,
-    5e-4,
-    5e-4,
-    1e-3,
-    1e-6,
-    2e-5, # μs (growth rate for sulfate reducers)
+    1/((1/Yd-1)*γc1), # Ya1 (yield of biomass from NO3-)
+    1/((1/Yd-1)*γc2), # Ya2 (yield of biomass from NO2-)
+    Yd, # Yd1 (yield of biomass from NO3-)
+    Yd, # Yd2 (yield of biomass from NO2-)
+    5e-4, # Ka1 (half-saturation constant for NO3-)
+    5e-4, # Ka2 (half-saturation constant for NO2-)
+    1e-3, # Ks (half-saturation constant for sulfate)
+    1e-6, # k_s (decay rate for sulfate)
+    8e-6, # μs (growth rate for sulfate reducers)
     1e-6, # Ks (half-saturation constant for sulfate)
-    1/((1/Yd-1)*γcs),
-    Yd,
-    5e-6,
+    1/((1/Yd-1)*γcs), # Ys (yield of biomass from sulfate)
+    Yd, # Yd3 (yield of biomass from sulfate)
+    5e-6, # I_no2 (inhibition constant for NO2-)
     5e-6, # I_no3 (inhibition constant for NO3-)
+    0.2, # f (fraction of fes2 electron donor)
 ]
 
 u0 = zeros(length(x), 8) # 5 mobile components + 2 immobile components (active and inactive biomass)
-# u0[:,1] .= 1e-12 # Initial concentration of NO3-
-# u0[:,2] .= 1e-12 # Initial concentration of NO2-
-u0[:,7] .= 1e-6 # Initial concentration of inactive biomass
-u0[:, 8] .= 1e-7 # Initial concentration of inactive biomass
+u0[:,7] .= 1e-4 # Initial concentration of inactive biomass
+u0[:, 8] .= 1e-4 # Initial concentration of inactive biomass
 du0 = copy(zeros(size(u0))) # Initialize the derivative array
 
 rhs!(du0, u0, p0, 0.0) # Calculate the initial derivative
@@ -214,7 +217,6 @@ sort!(tstops) # sort the times
 sol = solve(fastprob, FBDF(), abstol = 1e-14, reltol = 1e-18,
     maxiters = 100000,
     tstops = tstops,
-    d_discontinuities = tstops,
     )
 sol.t
 # Check model outflow:
@@ -227,27 +229,47 @@ tracer_out = [sol.u[i][end, 6] for i in eachindex(sol.t)]
 
 
 # check the outflow data
-col1 = all_ds[1]
-no2 = col1.no2
-no3 = col1.no3
-so4 = col1.so4
-fe = col1.fe
+col2 = all_ds[2]
+no2 = col2.no2
+no3 = col2.no3
+so4 = col2.so4
+fe = col2.fe
 # Plot results
 fig = Figure()
-ax = Axis(fig[1, 1], title = "Outflow concentrations",
+axn = Axis(fig[1, 1], title = "Outflow concentrations",
+    xlabel = "Time (days)", ylabel = "Concentration (M)",
+    yticks = 0:2e-4:1e-3)
+axf = Axis(fig[2, 1],
     xlabel = "Time (days)", ylabel = "Concentration (M)")
+axs = Axis(fig[3, 1],
+    xlabel = "Time (days)", ylabel = "Concentration (M)",
+    yticks = 1e-3:5e-4:3e-3)
+ylims!(axs, 9e-4, 3e-3)
 plot_t = sol.t ./ (24*60*60) # convert seconds to days
-lines!(ax, plot_t, no3_out, label = "NO3- outflow", color = :blue)
-lines!(ax, plot_t, tracer_out, label = "NO3- tracer outflow", color = :blue, linestyle = :dash)
-lines!(ax, plot_t, no2_out, label = "NO2- outflow", color = :orange)
-lines!(ax, plot_t, so4_out, label = "SO4-2 outflow", color = :green)
-lines!(ax, plot_t, fe_out, label = "Fe+2 outflow", color = :purple)
-lines!(ax, plot_t, lac_out, label = "Lactate outflow", color = :red)
-scatter!(ax, no2.t ./ (24*60*60), no2.conc*1e-6, label = "Measured NO2- outflow", color = :orange, markersize = 8)
-scatter!(ax, no3.t ./ (24*60*60), no3.conc*1e-6, label = "Measured NO3- outflow", color = :blue, markersize = 8)
-scatter!(ax, so4.t ./ (24*60*60), so4.conc*1e-6, label = "Measured SO4-2 outflow", color = :green, markersize = 8)
-scatter!(ax, fe.t ./ (24*60*60), fe.conc*1e-6, label = "Measured Fe outflow", color = :purple, markersize = 8)
-Legend(fig[1, 2], ax, position = :rc)
+lines!(axn, plot_t, no3_out, label = "NO3- outflow", color = :blue)
+lines!(axs, plot_t, tracer_out, label = "NO3- tracer outflow", color = :blue, linestyle = :dash)
+lines!(axn, plot_t, no2_out, label = "NO2- outflow", color = :orange)
+lines!(axs, plot_t, so4_out, label = "SO4-2 outflow", color = :green)
+lines!(axf, plot_t, fe_out, label = "Fe+2 outflow", color = :purple)
+# lines!(ax, plot_t, lac_out, label = "Lactate outflow", color = :red)
+scatter!(axn, no2.t ./ (24*60*60), no2.conc*1e-6, label = "Measured NO2- outflow", color = :orange, markersize = 8)
+scatter!(axn, no3.t ./ (24*60*60), no3.conc*1e-6, label = "Measured NO3- outflow", color = :blue, markersize = 8)
+scatter!(axs, so4.t ./ (24*60*60), so4.conc*1e-6, label = "Measured SO4-2 outflow", color = :green, markersize = 8)
+scatter!(axf, fe.t ./ (24*60*60), fe.conc*1e-6, label = "Measured Fe outflow", color = :purple, markersize = 8)
+plots_in_fig = AbstractPlot[]
+labels_in_fig = AbstractString[]
+for ax in [axn, axf, axs]
+    pl, lb = Makie.get_labeled_plots(ax, merge=false, unique=false)
+    append!(plots_in_fig, pl)
+    append!(labels_in_fig, lb)
+end
+
+ulabels = Base.unique(labels_in_fig)
+mergedplots = [[lp for (i, lp) in enumerate(plots_in_fig) if labels_in_fig[i] == ul]
+        for ul in ulabels]
+
+Legend(fig[:, 2], mergedplots, ulabels, framevisible=false)
+linkxaxes!(axn, axf, axs)
 fig
 save("outflow_concentrations.png", fig, px_per_unit = 2.0)
 
@@ -259,5 +281,5 @@ plot_x = x ./ 0.01 # convert cm to m
 lines!(ax2, plot_x, sol.u[end][:, 7], label = "Active biomass", color = :blue)
 lines!(ax2, plot_x, sol.u[end][:, 8], label = "sULFUR biomass", color = :orange)
 #lines!(ax2, plot_x, sol.u[end][:, 7], label = "Inactive biomass", color = :orange)
-axislegend(ax2, position = :rt)
+axislegend(ax2, position = :rc)
 fig2

@@ -73,14 +73,16 @@ function reactive_transport_builder(v_data::VDataS, cin_data::CinData, Deff, dx,
             no2_ = @view u[:,2]
             so4_ = @view u[:,3]
             fe2_ = @view u[:,4]
-            lac_ = @view u[:,5]
+            c_d = @view u[:,5] # dissolved organic carbon (DOC)
             no3t_ = @view u[:,6]  # NO3- tracer
             b = @view u[:,7]  # biomass active fraction (immobile))
             b_s = @view u[:,8]  # biomass sulfate reducers (immobile)
+            c_fe = @view u[:,9]  # solid Fe+2 (immobile)
+            #c_d = @view u[:,10]  # 
 
             # unpack the parameters
-            μ₁, μ₂, αₑ, k_dec, Ya1, Ya2, Yd1, Yd2, Ka1, Ka2, Kb,
-            r_so4_max, μₛ, Ks, Ys, Yds, I_no3, I_no2, f = p
+            μ₁, μ₂, μₛ, αₑ, αfe, k_dec, Ya1, Ya2, Yaf1, Yaf2, Ys, Yd1, Yd2, Yf1, Yf2, Yds,
+            Ka1, Ka2, Ks, Kb, K_fes, Kd, Kds, r_so4_max = p
 
             n_rows = size(u, 1)
             @inline c_in = dynamic_c_in(t)
@@ -113,29 +115,35 @@ function reactive_transport_builder(v_data::VDataS, cin_data::CinData, Deff, dx,
             end
             @inbounds for k in 1:n_rows
                 # Calculate each term once to avoid repeated computation
-                γ = αₑ/(b[k]+Kb)*(μ₁/Yd1*no3_[k]/(Ka1 + no3_[k]) + μ₂/Yd2*no2_[k]/(Ka2 + no2_[k]))^(-1)
+                γ = αfe/(b[k]+Kb)*(c_fe[k]/(c_fe[k]+K_fes))*(μ₁/Yf1*no3_[k]/(Ka1 + no3_[k]) + μ₂/Yf2*no2_[k]/(Ka2 + no2_[k]))^(-1)
                 γ = ifelse(γ ≥ 0.99, .99, γ)  # Limit γ to 1
-                γₛ = αₑ/(b_s[k]+Kb)*(μₛ/Yds*so4_[k]/(Ks + so4_[k])*I_no2/(I_no2 + no2_[k])*I_no3/(I_no3 + no3_[k]))^(-1)
-                γₛ = ifelse(γₛ ≥ 0.99, .99, γₛ)  # Limit γₛ to 1
-                r_no3b = μ₁/Ya1 * no3_[k] / (Ka1 + no3_[k]) * γ
-                r_no2b = μ₂/Ya2 * no2_[k] / (Ka2 + no2_[k]) * γ
-                r_b = ((μ₁ * no3_[k] / (Ka1 + no3_[k]) + 
-                    μ₂ * no2_[k] / (Ka2 + no2_[k])) * γ - k_dec) * b[k]  # Decay term
+                d_cd_prod = αₑ * (b[k]/(b[k]+Kb) + b_s[k]/(b_s[k]+Kb))
+                μcd1 = μ₁ * no3_[k] / (Ka1 + no3_[k]) * c_d[k] / (c_d[k] + Kd)
+                μcd2 = μ₂ * no2_[k] / (Ka2 + no2_[k]) * c_d[k] / (c_d[k] + Kd)
+                μscd = μₛ * so4_[k] / (Ks + so4_[k]) * c_d[k] / (c_d[k] + Kds)
+                d_cd_cons = (μcd1/Yd1 + μcd2/Yd2)*b[k] + μscd/Yds*b_s[k]
+                μfe_no3 = μ₁ * no3_[k] / (Ka1 + no3_[k]) * γ
+                μfe_no2 = μ₂ * no2_[k] / (Ka2 + no2_[k]) * γ
+                d_no3_cons = μfe_no3/Yaf1 * b[k]
+                d_no2_cons = μfe_no2/Yaf2 * b[k]
+                full_no3_cons = (μfe_no3/Yaf1 + μcd1/Ya1)*b[k]
+                full_no2_cons = (μfe_no2/Yaf2 + μcd2/Ya2)*b[k]
+                r_b = (μcd1+μcd2+μfe_no3+μfe_no2-k_dec)*b[k]  # Decay term
                 so4_max = 2.6e-3
                 r_so4 = r_so4_max * (1 - so4_[k]/so4_max) # Sulfate dissolution term
-                r_fe = (1/7 * r_no3b * b[k] + 3/14 * r_no2b * b[k])*f  # Iron dissolution term
-                r_so4n = (2/7 * r_no3b * b[k] + 3/7 * r_no2b * b[k])*f  # Sulfate dissolution term
-                r_s = μₛ/Ys * so4_[k] / (Ks + so4_[k]) * I_no2/(I_no2 + no2_[k]) * I_no3/(I_no3 + no3_[k]) * γₛ  # Sulfate reduction term
-                r_b_s = (r_s*Ys-k_dec) * b_s[k]  # Sulfate reduction term for biomass
+                r_fe_s = 1/7 * d_no3_cons + 3/14 * d_no2_cons  # Iron dissolution term
+                r_so4n = 2/7 * d_no3_cons + 3/7 * d_no2_cons  # Sulfate dissolution term
+                d_so4_cons = μscd/Ys * b_s[k]  # Sulfate consumption term
+                r_b_s = (μscd-k_dec) * b_s[k]  # Sulfate reduction term for biomass
                 # Update state variables
-                du[k,1] -= r_no3b*b[k]
-                du[k,2] += (r_no3b - r_no2b)*b[k]
-                du[k,3] += r_so4 - r_s * b_s[k] + r_so4n  # sulfate concentration
-                du[k,4] += r_fe
-                # du[k,5] -= mult_term*r_no2b*b
+                du[k,1] -= full_no3_cons  # NO3- consumption
+                du[k,2] += full_no3_cons - full_no2_cons  # NO2- production and consumption
+                du[k,3] += r_so4 - d_so4_cons + r_so4n  # sulfate concentration
+                du[k,4] += r_fe_s
+                du[k,5] += d_cd_prod - d_cd_cons  # dissolved organic carbon production and consumption
                 du[k,7] = r_b  # biomass active fraction
                 du[k,8] = r_b_s  # biomass inactive fraction
-                du[k,9] = -r_fe # solid Fe+2 consumption
+                du[k,9] = -r_fe_s  # solid Fe+2 consumption
             end
         end
     return rhs!
@@ -157,26 +165,32 @@ rhs! = reactive_transport_builder(v_st[1], c_ins[1], Deff, dx, tracer_params[1][
 γc2 = 4/3 # stoichiometric coefficient of e-acceptor in the catabolic rea
 γcs = 1/2
 Yd = 0.3 # yield of biomass from the catabolic reaction
+Yf = 0.1
 p0 = [
     3e-5, # μ₁ (growth rate for NO3-)
-    3e-5, # μ₂ (growth rate for NO2-)
-    4e-7, # αₑ (electron donor release rate)
-    1.15e-6, # k_dec (decay rate)
+    5e-5, # μ₂ (growth rate for NO2-)
+    3e-5, # μₛ (growth rate for sulfate reducers)
+    5e-8, # αₑ (carbon electron donor release rate)
+    1e-7, # αfe (iron electron donor release rate)
+    1.15e-7, # k_dec (decay rate)
     1/((1/Yd-1)*γc1), # Ya1 (yield of biomass from NO3-)
     1/((1/Yd-1)*γc2), # Ya2 (yield of biomass from NO2-)
+    1/((1/Yf-1)*1/7), # Yaf1 (yield of biomass from iron-NO3-)
+    1/((1/Yf-1)*3/7), # Yaf2 (yield of biomass from iron-NO2-)
+    1/((1/Yd-1)*γcs), # Ys (yield of biomass from sulfate)
     Yd, # Yd1 (yield of biomass from NO3-)
     Yd, # Yd2 (yield of biomass from NO2-)
+    Yf, # Yf1 (yield of biomass from iron-NO3-)
+    Yf, # Yf2 (yield of biomass from iron-NO2-)
+    Yd, # Yds (yield of biomass from sulfate)
     5e-4, # Ka1 (half-saturation constant for NO3-)
     5e-4, # Ka2 (half-saturation constant for NO2-)
-    1e-3, # Ks (half-saturation constant for sulfate)
-    1e-6, # k_s (decay rate for sulfate)
-    8e-6, # μs (growth rate for sulfate reducers)
-    1e-6, # Ks (half-saturation constant for sulfate)
-    1/((1/Yd-1)*γcs), # Ys (yield of biomass from sulfate)
-    Yd, # Yd3 (yield of biomass from sulfate)
-    2e-5, # I_no2 (inhibition constant for NO2-)
-    2e-5, # I_no3 (inhibition constant for NO3-)
-    0.2, # f (fraction of fes2 electron donor)
+    1e-4, # Ks (half-saturation constant for sulfate)
+    5e-5, # Kb (half-saturation constant for biomass)
+    1e-4, # K_fes (half-saturation constant for solid Fe+2)
+    1e-6, # Kd (half-saturation constant for DOC)
+    1e-6, # Kds (half-saturation constant for DOC-sulfate)
+    1e-6, # r_so4_max (maximum sulfate release rate)
 ]
 ρₛ = 2.65
 ϕ, αₗ = tracer_params[1][1], tracer_params[1][2] # Porosity and dispersivity for column 1
@@ -269,7 +283,7 @@ Legend(fig[:, 2], mergedplots, ulabels, framevisible=false)
 linkxaxes!(axn, axf, axs)
 resize_to_layout!(fig)
 fig
-save("outflow_concentrations.png", fig, px_per_unit = 2.0)
+save("plots/new_model_outflow_concentrations.png", fig, px_per_unit = 2.0)
 
 # Plot alive vs inactive biomass
 fig2 = Figure()

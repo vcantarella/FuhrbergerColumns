@@ -88,8 +88,8 @@ function reactive_transport_builder(v_data::VData, cin_data::CinData, Deff, dx, 
             b_s = @view u[:,8]  # biomass sulfate reducers (immobile)
 
             # unpack the parameters
-            μ₁, μ₂, αₑ, k_dec, Ya1, Ya2, Yd1, Yd2, Ka1, Ka2, Kb,
-            r_so4_max, μₛ, Ks, Ys, Yds, I_no3, I_no2, f = p
+            μ₁, μ₂, αₑ1, αₑ2, k_dec, Ya1, Ya2, Yd1, Yd2, Ka1, Ka2, Kb,
+            r_so4_max, μₛ, Ks, Ys, Yds, I_n, = p
 
             n_rows = size(u, 1)
             @inline c_in = dynamic_c_in(t)
@@ -122,28 +122,32 @@ function reactive_transport_builder(v_data::VData, cin_data::CinData, Deff, dx, 
             end
             @inbounds for k in 1:n_rows
                 # Calculate each term once to avoid repeated computation
-                γ = αₑ/(b[k]+Kb)*(μ₁/Yd1*no3_[k]/(Ka1 + no3_[k]) + μ₂/Yd2*no2_[k]/(Ka2 + no2_[k]))^(-1)
-                γ = ifelse(γ ≥ 0.99, .99, γ)  # Limit γ to 1
-                γₛ = αₑ/(b_s[k]+Kb)*(μₛ/Yds*so4_[k]/(Ks + so4_[k])*I_no2/(I_no2 + no2_[k])*I_no3/(I_no3 + no3_[k]))^(-1)
+                γ₁ = αₑ1/(b[k]+Kb)*(μ₁/Yd1*no3_[k]/(Ka1 + no3_[k]) + μ₂/Yd2*no2_[k]/(Ka2 + no2_[k]))^(-1)
+                γ₁ = ifelse(γ₁ ≥ 0.99, .99, γ₁)  # Limit γ₁ to 1
+                γ₂ = αₑ2/(b[k]+Kb)*(μ₁/Yd1*no3_[k]/(Ka1 + no3_[k]) + μ₂/Yd2*no2_[k]/(Ka2 + no2_[k]))^(-1)
+                γ₂ = ifelse(γ₂ ≥ 0.99, .99, γ₂)  # Limit γ₂ to 1
+                γₛ = αₑ2/(b_s[k]+Kb)*(μₛ/Yds*so4_[k]/(Ks + so4_[k])*I_n/(I_n + no2_[k])*I_n/(I_n + no3_[k]))^(-1)
                 γₛ = ifelse(γₛ ≥ 0.99, .99, γₛ)  # Limit γₛ to 1
-                r_no3b = μ₁/Ya1 * no3_[k] / (Ka1 + no3_[k]) * γ
-                r_no2b = μ₂/Ya2 * no2_[k] / (Ka2 + no2_[k]) * γ
-                r_b = ((μ₁ * no3_[k] / (Ka1 + no3_[k]) + 
-                    μ₂ * no2_[k] / (Ka2 + no2_[k])) * γ - k_dec) * b[k]  # Decay term
-                so4_max = 2.6e-3
+                r_no3b = μ₁ * no3_[k] / (Ka1 + no3_[k]) * γ₁ # monod growth terms
+                r_no3b2 = μ₁ * no3_[k] / (Ka1 + no3_[k]) * γ₂
+                r_no2b = μ₂ * no2_[k] / (Ka2 + no2_[k]) * γ₁
+                r_no2b2 = μ₂ * no2_[k] / (Ka2 + no2_[k]) * γ₂
+                r_b = (r_no3b + r_no3b2 + r_no2b + r_no2b2 - k_dec) * b[k]  # Bacteria growth model
+                so4_max = 2.6e-3 # Maximum sulfate concentration (mineral equilibrium)
                 r_so4 = r_so4_max * (1 - so4_[k]/so4_max) # Sulfate dissolution term
-                r_fe = (1/7 * r_no3b * b[k] + 3/14 * r_no2b * b[k])*f  # Iron dissolution term
-                r_so4n = (2/7 * r_no3b * b[k] + 3/7 * r_no2b * b[k])*f  # Sulfate dissolution term
-                r_sb = μₛ * so4_[k] / (Ks + so4_[k]) * I_no2/(I_no2 + no2_[k]) * I_no3/(I_no3 + no3_[k]) * γₛ  # Sulfate reduction term
-                r_b_s = (r_sb-k_dec) * b_s[k]  # Sulfate reduction term for biomass
+                r_fe = (1/7 * r_no3b/Ya1 * b[k] + 3/14 * r_no2b/Ya2 * b[k])  # Iron dissolution term
+                r_so4n = (2/7 * r_no3b/Ya1 * b[k] + 3/7 * r_no2b/Ya2 * b[k])  # Sulfate dissolution term
+                r_s = μₛ* so4_[k] / (Ks + so4_[k]) * I_n/(I_n + no2_[k]) * I_n/(I_n + no3_[k]) * γₛ  # Sulfate reduction term
+                r_b_s = (r_s - k_dec) * b_s[k]  # Sulfate reduction term for biomass
                 # Update state variables
                 du[k,1] -= r_no3b*b[k]
                 du[k,2] += (r_no3b - r_no2b)*b[k]
-                du[k,3] += r_so4 - r_sb/Ys * b_s[k] + r_so4n  # sulfate concentration
+                du[k,3] += r_so4 - r_s * b_s[k] + r_so4n  # sulfate concentration
                 du[k,4] += r_fe
                 # du[k,5] -= mult_term*r_no2b*b
                 du[k,7] = r_b  # biomass active fraction
                 du[k,8] = r_b_s  # biomass inactive fraction
+                du[k,9] = -r_fe*ϕ/((1-ϕ)*ρₛ) # consumption of Fe+2
             end
         end
     return rhs!

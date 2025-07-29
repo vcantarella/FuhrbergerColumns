@@ -46,24 +46,14 @@ Builds the reactive transport model for the given flow data and inflow concentra
     - `rhs!(du, u, p, t)`: Function that computes the right-hand side of the ODE system.
     According to DifferentialEquations.jl solver requirements.
 """
-function reactive_transport_builder(v_data::VData, cin_data::CinData, Deff, dx, ϕ, αₗ, ρₛ)
+function reactive_transport_builder(v_data::VDataS, cin_data::CinData, Deff, dx, ϕ, αₗ, ρₛ)
     vs = SVector{length(v_data.v)}(v_data.v)
     # v = mean(vs) # average velocity
     Des = MVector{length(Deff)}(Deff)
-    end_times = SVector{length(v_data.end_times)}(v_data.end_times)
+    start_times = SVector{length(v_data.start_times)}(v_data.start_times)
     c_ins = SVector{length(cin_data.c_in)}(cin_data.c_in)
     t_ins = SVector{length(cin_data.t_in)}(cin_data.t_in)
-    function dynamic_transport(t, vs=vs, end_times=end_times)::Float64
-        @inbounds for i in eachindex(vs)
-            if t <= end_times[i]
-                v = vs[i]
-                return v   # This should be inside the if block
-            end
-        end
-        # Add a fallback return outside the loop
-        return vs[end]
-    end
-    interp = SmoothedConstantInterpolation(vs, end_times, d_max=300,extrapolation = ExtrapolationType.Constant)
+    interp = SmoothedConstantInterpolation(vs, start_times, d_max=300,extrapolation = ExtrapolationType.Constant)
 
     function dynamic_c_in(t, c_ins=c_ins, t_ins=t_ins)
         @inbounds for i in eachindex(t_ins)
@@ -73,7 +63,7 @@ function reactive_transport_builder(v_data::VData, cin_data::CinData, Deff, dx, 
         end
         return c_ins[end]  # Return the last concentration if no match found
     end
-    function build_rhs(dynamic_transport, dynamic_c_in, dx, Deff, αₗ, De=Des)
+    function build_rhs(interp, dynamic_c_in, dx, Deff, αₗ, De=Des)
         function rhs!(du, u, p, t)
             @inline v = interp(t)
             De .= Deff .+ αₗ * v
@@ -134,21 +124,22 @@ function reactive_transport_builder(v_data::VData, cin_data::CinData, Deff, dx, 
                 r_so4 = r_so4_max * (1 - so4_[k]/so4_max) # Sulfate dissolution term
                 r_fe = (1/7 * r_no3b * b[k] + 3/14 * r_no2b * b[k])*f  # Iron dissolution term
                 r_so4n = (2/7 * r_no3b * b[k] + 3/7 * r_no2b * b[k])*f  # Sulfate dissolution term
-                r_sb = μₛ * so4_[k] / (Ks + so4_[k]) * I_no2/(I_no2 + no2_[k]) * I_no3/(I_no3 + no3_[k]) * γₛ  # Sulfate reduction term
-                r_b_s = (r_sb-k_dec) * b_s[k]  # Sulfate reduction term for biomass
+                r_s = μₛ/Ys * so4_[k] / (Ks + so4_[k]) * I_no2/(I_no2 + no2_[k]) * I_no3/(I_no3 + no3_[k]) * γₛ  # Sulfate reduction term
+                r_b_s = (r_s*Ys-k_dec) * b_s[k]  # Sulfate reduction term for biomass
                 # Update state variables
                 du[k,1] -= r_no3b*b[k]
                 du[k,2] += (r_no3b - r_no2b)*b[k]
-                du[k,3] += r_so4 - r_sb/Ys * b_s[k] + r_so4n  # sulfate concentration
+                du[k,3] += r_so4 - r_s * b_s[k] + r_so4n  # sulfate concentration
                 du[k,4] += r_fe
                 # du[k,5] -= mult_term*r_no2b*b
                 du[k,7] = r_b  # biomass active fraction
                 du[k,8] = r_b_s  # biomass inactive fraction
+                du[k,9] = -r_fe # solid Fe+2 consumption
             end
         end
     return rhs!
     end
-    return build_rhs(dynamic_transport, dynamic_c_in, dx, Deff, αₗ)
+    return build_rhs(interp, dynamic_c_in, dx, Deff, αₗ)
 end
 
 dx = 0.0005 # Spatial step size
@@ -157,7 +148,7 @@ L = 0.08 #m (8 cm)  # Spatial locations
 
 # Starting the model for column 1
 x = range(0+dx/2, stop=L-dx/2, step=dx)  # Spatial locations
-rhs! = reactive_transport_builder(v_ds[1], c_ins[1], Deff, dx, tracer_params[1][1],
+rhs! = reactive_transport_builder(v_st[1], c_ins[1], Deff, dx, tracer_params[1][1],
     tracer_params[1][2], 2.65)
 
 γa = 1/25 # stoichiometric coefficient of e-acceptor in the anabolic rctieaction
@@ -186,10 +177,12 @@ p0 = [
     5e-6, # I_no3 (inhibition constant for NO3-)
     0.2, # f (fraction of fes2 electron donor)
 ]
-
-u0 = zeros(length(x), 8) # 5 mobile components + 2 immobile components (active and inactive biomass)
-u0[:,7] .= 1e-4 # Initial concentration of inactive biomass
-u0[:, 8] .= 1e-4 # Initial concentration of inactive biomass
+ρₛ = 2.65
+ϕ, αₗ = tracer_params[1][1], tracer_params[1][2] # Porosity and dispersivity for column 1
+u0 = zeros(length(x), 9) # 6 mobile components + 3 immobile components (active and inactive biomass)
+u0[:,7] .= 1e-4 # Initial concentration of denitrifiers biomass
+u0[:, 8] .= 1e-4 # Initial concentration of sulfur reducers biomass
+u0[:, 9] .= 5.6e-3*ρₛ*(1-ϕ)/ϕ # Initial concentration of solid Fe+2 mol/kg 
 du0 = copy(zeros(size(u0))) # Initialize the derivative array
 
 rhs!(du0, u0, p0, 0.0) # Calculate the initial derivative
@@ -212,7 +205,7 @@ fixed_rhs! = ODEFunction(rhs!, jac_prototype=jac_sparsity2)
 fastprob = ODEProblem(fixed_rhs!, u0, tspan, p0)
 
 # defining points to stop
-tstops = vcat(v_ds[1].end_times, c_ins[1].t_in)
+tstops = vcat(v_st[1].start_times, c_ins[1].t_in)
 sort!(tstops) # sort the times
 sol = solve(fastprob, FBDF(), abstol = 1e-14, reltol = 1e-18,
     maxiters = 100000,
@@ -282,3 +275,11 @@ lines!(ax2, plot_x, sol.u[end][:, 7], label = "Active biomass", color = :blue)
 lines!(ax2, plot_x, sol.u[end][:, 8], label = "Sulfur biomass", color = :orange)
 axislegend(ax2, position = :rc)
 fig2
+
+# Plot Fe+2 concentration
+fig3 = Figure()
+ax3 = Axis(fig3[1, 1], title = "Fe+2 concentration",
+    xlabel = "length (m)", ylabel = "Concentration (M)")
+lines!(ax3, plot_x, sol.u[end][:, 9], label = "Fe+2 concentration", color = :purple)
+axislegend(ax3, position = :rc)
+fig3

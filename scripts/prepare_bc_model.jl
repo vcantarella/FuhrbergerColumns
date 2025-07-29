@@ -135,6 +135,46 @@ for i in 1:4
     v_ds[i] = VData(v, end_times)
 end
 
+# v_ds is based on end_times, If I want to use DataInterpolations, I can use the start times instead.
+
+v_st = Dict{Int, VDataS}()
+D = 3.5*1e-2 #cm to m diameter of the column
+A = π * D^2 / 4 # Cross-sectional area
+for i in 1:4
+    # only the values where there are no missing values in the flow rate
+    ϕ = tracer_params[i][1]
+    αₗ = tracer_params[i][2]
+    bool_index = (.!ismissing.(df[:, "Q"])) .& (df[!,"column"] .== i)
+    # convert the flow rate to μL/min
+    Q = df[bool_index,"Q"] ./ 60 .* 1e-9 # convert from μL/min to m3/s
+    start_times = Dates.value.(Dates.Second.(start_time[bool_index] .- t0sdict[i])) # start times in seconds
+    # create a VData object and push it to the dictionary
+    # check when the flow rate was 0
+    t_stop_1_s = Dates.value(Dates.Second(t_stop_1 - t0sdict[i]))
+    t_stop_2_s = Dates.value(Dates.Second(t_stop_2 - t0sdict[i]))
+    t_restart_1_2_s = Dates.value(Dates.Second(t_restart_1_2 - t0sdict[i]))
+    t_stop_s = Dates.value(Dates.Second(t_stop_all - t0sdict[i]))
+    t_restart_s = Dates.value(Dates.Second(t_restart_all - t0sdict[i]))
+    if i == 1
+        ind_i = findlast(start_times .< t_stop_1_s)
+        Q = vcat(Q[1:ind_i],[0., Q[ind_i+1]],Q[ind_i+1:end]) # take only the values before the stop
+        start_times = vcat(start_times[1:ind_i], [t_stop_1_s, t_restart_1_2_s], start_times[ind_i+1:end]) # add the stop time
+    elseif i == 2
+        ind_i = findlast(start_times .< t_stop_2_s)
+        Q = vcat(Q[1:ind_i],[0., Q[ind_i+1]],Q[ind_i+1:end]) # take only the values before the stop
+        start_times = vcat(start_times[1:ind_i], [t_stop_2_s, t_restart_1_2_s], start_times[ind_i+1:end]) # add the stop time
+    end
+
+    ind = findlast(start_times .< t_stop_s)
+    Q = vcat(Q[1:ind],[0., Q[ind+1]],Q[ind+1:end]) # take only the values before the stop
+    start_times = vcat(start_times[1:ind], [t_stop_s, t_restart_s], start_times[ind+1:end]) # add the stop time
+    v = Q./(ϕ * A) # flow velocity in m/s
+    v = convert.(Float64, v) # convert to Float64
+    #De = v .* αₗ # longitudinal dispersion coefficient in m2/s
+    # create a VDataS object and push it to the vector
+    v_st[i] = VDataS(v, start_times)
+end
+
 
 
 ## Events:

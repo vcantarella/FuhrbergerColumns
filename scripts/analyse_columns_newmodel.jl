@@ -134,12 +134,12 @@ function reactive_transport_builder(v_data::VData, cin_data::CinData, Deff, dx, 
                 r_so4 = r_so4_max * (1 - so4_[k]/so4_max) # Sulfate dissolution term
                 r_fe = (1/7 * r_no3b * b[k] + 3/14 * r_no2b * b[k])*f  # Iron dissolution term
                 r_so4n = (2/7 * r_no3b * b[k] + 3/7 * r_no2b * b[k])*f  # Sulfate dissolution term
-                r_s = μₛ/Ys * so4_[k] / (Ks + so4_[k]) * I_no2/(I_no2 + no2_[k]) * I_no3/(I_no3 + no3_[k]) * γₛ  # Sulfate reduction term
-                r_b_s = (r_s-k_dec) * b_s[k]  # Sulfate reduction term for biomass
+                r_sb = μₛ * so4_[k] / (Ks + so4_[k]) * I_no2/(I_no2 + no2_[k]) * I_no3/(I_no3 + no3_[k]) * γₛ  # Sulfate reduction term
+                r_b_s = (r_sb-k_dec) * b_s[k]  # Sulfate reduction term for biomass
                 # Update state variables
                 du[k,1] -= r_no3b*b[k]
                 du[k,2] += (r_no3b - r_no2b)*b[k]
-                du[k,3] += r_so4 - r_s * b_s[k] + r_so4n  # sulfate concentration
+                du[k,3] += r_so4 - r_sb/Ys * b_s[k] + r_so4n  # sulfate concentration
                 du[k,4] += r_fe
                 # du[k,5] -= mult_term*r_no2b*b
                 du[k,7] = r_b  # biomass active fraction

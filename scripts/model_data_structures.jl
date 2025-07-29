@@ -18,6 +18,15 @@ struct VData{QT, T}
 end
 
 """
+    VData{QT, T}
+Data structure to hold the flow velocity data and corresponding start times.
+"""
+struct VDataS{QT, T}
+    v::QT # flow velocity in m/s
+    start_times::T
+end
+
+"""
     CinData{QT, T}
 Data structure to hold inflow concentration and time.
 This structure holds the inflow concentration data and the corresponding time.

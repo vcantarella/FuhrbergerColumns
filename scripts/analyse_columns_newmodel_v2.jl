@@ -17,7 +17,7 @@ tracer_params = load("data/optimized_tracer_params.jld2") # Load the optimized t
 # Load the prepared data
 function prepare_data()
     include("prepare_lab_data_model.jl")
-    return v_ds, c_ins, all_ds
+    return v_st, c_ins, all_ds
 end
 
 prepare_data()
@@ -53,7 +53,8 @@ function reactive_transport_builder(v_data::VDataS, cin_data::CinData, Deff, dx,
     start_times = SVector{length(v_data.start_times)}(v_data.start_times)
     c_ins = SVector{length(cin_data.c_in)}(cin_data.c_in)
     t_ins = SVector{length(cin_data.t_in)}(cin_data.t_in)
-    interp = SmoothedConstantInterpolation(vs, start_times, d_max=300,extrapolation = ExtrapolationType.Constant)
+    interp = SmoothedConstantInterpolation(vs, start_times, d_max=300,
+        extrapolation = ExtrapolationType.Constant)
 
     function dynamic_c_in(t, c_ins=c_ins, t_ins=t_ins)
         @inbounds for i in eachindex(t_ins)
@@ -173,8 +174,8 @@ p0 = [
     1e-6, # Ks (half-saturation constant for sulfate)
     1/((1/Yd-1)*γcs), # Ys (yield of biomass from sulfate)
     Yd, # Yd3 (yield of biomass from sulfate)
-    5e-6, # I_no2 (inhibition constant for NO2-)
-    5e-6, # I_no3 (inhibition constant for NO3-)
+    2e-5, # I_no2 (inhibition constant for NO2-)
+    2e-5, # I_no3 (inhibition constant for NO3-)
     0.2, # f (fraction of fes2 electron donor)
 ]
 ρₛ = 2.65
@@ -231,12 +232,15 @@ fe = col2.fe
 fig = Figure()
 axn = Axis(fig[1, 1], title = "Outflow concentrations",
     xlabel = "Time (days)", ylabel = "Concentration (M)",
-    yticks = 0:2e-4:1e-3)
+    yticks = 0:2e-4:1e-3,
+    width = 600, height = 300)
 axf = Axis(fig[2, 1],
-    xlabel = "Time (days)", ylabel = "Concentration (M)")
+    xlabel = "Time (days)", ylabel = "Concentration (M)",
+    width = 600, height = 300,)
 axs = Axis(fig[3, 1],
     xlabel = "Time (days)", ylabel = "Concentration (M)",
-    yticks = 1e-3:5e-4:3e-3)
+    yticks = 1e-3:5e-4:3e-3,
+    width = 600, height = 300)
 ylims!(axs, 9e-4, 3e-3)
 plot_t = sol.t ./ (24*60*60) # convert seconds to days
 lines!(axn, plot_t, no3_out, label = "NO3- outflow", color = :blue)
@@ -263,6 +267,7 @@ mergedplots = [[lp for (i, lp) in enumerate(plots_in_fig) if labels_in_fig[i] ==
 
 Legend(fig[:, 2], mergedplots, ulabels, framevisible=false)
 linkxaxes!(axn, axf, axs)
+resize_to_layout!(fig)
 fig
 save("outflow_concentrations.png", fig, px_per_unit = 2.0)
 

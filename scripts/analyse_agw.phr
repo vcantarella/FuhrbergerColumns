@@ -2,10 +2,11 @@ DATABASE phreeqc_old.dat
 SOLUTION 1
 END
 REACTION 1
-    MgCl2 0.62e-3
-    CaCl2 0.092e-3
-    AmmCl 1.89e-3
-    KH2PO4 0.1e-3
+    MgCl2	0.0003
+    CaCl2	0.0005
+    AmmCl	0.0002
+    KH2PO4	0.0001
+    NaCl	0.0000
 USE solution 1
 SAVE solution 1
 END
@@ -15,8 +16,6 @@ GAS_PHASE 1
     Amm(g) 0
     O2(g) 0
 USE solution 1
-REACTION_TEMPERATURE
-    45
 SAVE solution 1
 END
 SOLUTION 2
@@ -28,7 +27,5 @@ SAVE solution 2
 END
 MIX 1
     1 1
-    2 0.007
+    2 0.004
 END
-
-

@@ -27,6 +27,19 @@ for df in dfs
     df[!, "t (unadjusted) [days]"] .= Dates.value.(df[!, "avg_time"] .- t0) / (1000 * 60 * 60 * 24)
 end
 
+# read the NO2- data and merge it with the main dataframes
+df_no2 = DataFrame(XLSX.readtable(file_path, "standard_curve_no2"))
+# for each sample in df_no2, find the corresponding sample in each df and add the NO2- value
+for df in dfs
+    df[!, "NO2-"] .= missing
+    for (i, sample) in enumerate(df_no2[!, "Sample"])
+        for j in 1:nrow(df)
+            if df[j, "Sample"] == sample
+                df[j, "no2_mmol_L"] = df_no2[i, "no2- [micromol/L]"] / 1000
+            end
+        end
+    end
+end
 ## Events:
 # Start time for the t0 of the experiment for columns 1 and 2
 
@@ -78,14 +91,14 @@ for i in 1:4
     lines!(ax2, t, EC, label = "Column $i", color = colors[i])
     scatter!(ax2, t, EC, label = "Column $i", color = colors[i])
     # get the data for the column
-    # NO2 = df[!, "NO2-"]
-    # index = findall(!ismissing, NO2)
-    # NO2 = NO2[index]
-    # t = df[!, "t (unadjusted) [days]"]
-    # t = t[index]
+    NO2 = df[!, "no2_mmol_L"]
+    index = findall(!ismissing, NO2)
+    NO2 = NO2[index]*1000
+    t = df[!, "t (unadjusted) [days]"]
+    t = t[index]
     # # plot the data
-    # lines!(ax3, t, NO2, label = "Column $i", color = colors[i])
-    # scatter!(ax3, t, NO2, label = "Column $i", color = colors[i])
+    lines!(ax3, t, NO2, label = "Column $i", color = colors[i])
+    scatter!(ax3, t, NO2, label = "Column $i", color = colors[i])
     # # plot in the early time data
     # lines!(ax1e, t[t.< 8], NO2[t.< 8], label = "Column $i", color = colors[i])
     # scatter!(ax1e, t[t.< 8], NO2[t.< 8], label = "Column $i", color = colors[i])

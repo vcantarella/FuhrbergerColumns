@@ -178,3 +178,4 @@ framevisible = false, nbanks = 2)
 # adjust the layout
 CairoMakie.resize_to_layout!(fig)
 fig
+save("plots/ssexp_overview.png", fig)

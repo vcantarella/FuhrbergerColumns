@@ -50,11 +50,11 @@ colors = [:red, :blue, :green, :orange]
 fig = Figure(size = (1200, 800))
 ax1 = Axis(fig[1, 1], title = "pH", ylabel = "pH", xlabel = "t (days)")
 ax2 = Axis(fig[2, 1], title = "EC", ylabel = "EC [μS/cm]", xlabel = "t (days)")
-ax3 = Axis(fig[1, 2], title = "NO2-", ylabel = "NO2- [μM]", xlabel = "t (days)")
-ax4 = Axis(fig[2, 2], title = "Q [μL/min]", ylabel = "Q [μL/min]", xlabel = "t (days)")
-ax5 = Axis(fig[2, 3], title = "Fe2+", ylabel = "Fe2+ [μM]", xlabel = "t (days)")
-ax6 = Axis(fig[1, 3], title = "NO3-", ylabel = "NO3- [μM]", xlabel = "t (days)")
-ax7 = Axis(fig[3, 1], title = "SO4-2", ylabel = "SO4-2 [μM]", xlabel = "t (days)")
+ax3 = Axis(fig[1, 2], title = "NO₂⁻", ylabel = "NO₂⁻ [μM]", xlabel = "t (days)")
+ax4 = Axis(fig[2, 2], title = "Q [ml/hr]", ylabel = "Q [ml/hr]", xlabel = "t (days)")
+ax5 = Axis(fig[2, 3], title = "Fe²⁺", ylabel = "Fe²⁺ [μM]", xlabel = "t (days)")
+ax6 = Axis(fig[1, 3], title = "NO₃⁻", ylabel = "NO₃⁻ [μM]", xlabel = "t (days)")
+ax7 = Axis(fig[3, 1], title = "SO₄²⁻", ylabel = "SO₄²⁻ [μM]", xlabel = "t (days)")
 
 # Figure from the early time data
 fige = Figure()

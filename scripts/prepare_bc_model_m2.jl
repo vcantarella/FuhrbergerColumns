@@ -2,6 +2,9 @@ using DrWatson
 using DataFrames, XLSX, Statistics
 using Dates
 using StaticArrays
+using CairoMakie
+import DataInterpolations as DI
+import RegularizationTools as RT
 include("model_data_structures.jl")
 # load analytical data
 file_path = datadir("exp_raw", "ssexp_data.xlsx")
@@ -10,18 +13,26 @@ datas = [XLSX.readtable(file_path, sheet_name) for sheet_name in sheet_names]
 dfs = [DataFrame(data) for data in datas]
 # start-time and end-time columns are of type Any because some of the values are in DateTiem and some in Time.
 df = vcat(dfs...)
-start_time = df[!,"time_in"]
-end_time = df[!,"time_out"]
+start_time = df[!,"start_time"]
+end_time = df[!,"end_time"]
+tracer_sheet = "bromide_curve_v2"
+df_tr = DataFrame(XLSX.readtable(file_path, tracer_sheet))
+re_tr = r"^B(\d?)"
+df_tr[!, "column"] = match.(re_tr, df_tr[!,"Sample"]) .|> x -> x.captures[1] |> x -> parse(Int, x)
+start_time = vcat(start_time, df_tr[!,"start_time"])
+end_time = vcat(end_time, df_tr[!,"end_time"])
+flow_rate = vcat(df[!,"flow_rate"], df_tr[!,"flow_rate"])
 # Start time for the t0 of the experiment for columns 1 and 2
 t0 = DateTime(2025, 09, 18, 18, 15)
 re = r"^P(\d?)"
 df[!, "column"] = match.(re, df[!,"Sample"]) .|> x -> x.captures[1] |> x -> parse(Int, x)
+column = vcat(df[!,"column"], df_tr[!,"column"])
 # convert start_time and end_time to seconds since t0_dt
 Q0 = Dict(
-    1 =>  df[(.!ismissing.(df[:, "flow_rate"])) .& (df[!,"column"] .== 1),"flow_rate"][1]./ 3600 .* 1e-6,
-    2 => df[(.!ismissing.(df[:, "flow_rate"])) .& (df[!,"column"] .== 2),"flow_rate"][1]./ 3600 .* 1e-6,
-    3 => df[(.!ismissing.(df[:, "flow_rate"])) .& (df[!,"column"] .== 3),"flow_rate"][1]./ 3600 .* 1e-6,
-    4 => df[(.!ismissing.(df[:, "flow_rate"])) .& (df[!,"column"] .== 4),"flow_rate"][1]./ 3600 .* 1e-6
+    1 =>  flow_rate[(.!ismissing.(flow_rate) .& (column .== 1))][1]./ 3600 .* 1e-6,
+    2 => flow_rate[(.!ismissing.(flow_rate) .& (column .== 2))][1]./ 3600 .* 1e-6,
+    3 => flow_rate[(.!ismissing.(flow_rate) .& (column .== 3))][1]./ 3600 .* 1e-6,
+    4 => flow_rate[(.!ismissing.(flow_rate) .& (column .== 4))][1]./ 3600 .* 1e-6
 )
 
 #Dead volumes per column
@@ -60,9 +71,9 @@ t0s = Dict(1 => t0 + Dates.Second(floor(Int64, dv_t0[1]*1e-6 / Q0[1])),
 disch_ds = Dict()
 for i in 1:4
     # only the values where there are no missing values in the flow rate
-    bool_index = (.!ismissing.(df[:, "flow_rate"])) .& (df[!,"column"] .== i)
+    bool_index = (.!ismissing.(flow_rate) .& (column .== i))
     # convert the flow rate to μL/min
-    Q = df[bool_index,"flow_rate"] ./ 3600 .* 1e-6 # convert from μL/min to m3/s
+    Q = flow_rate[bool_index] ./ 3600 .* 1e-6 # convert from ml/hr to m3/s
     end_times = Dates.Second.(end_time[bool_index] .- t0s[i]) # end times in seconds
     # create a QData object and push it to the dictionary
     disch_ds[i] = QData(Q, Dates.value.(end_times))
@@ -102,6 +113,9 @@ tracer_params = transp_params["tracer_params"]
 
 v_ds = Dict{Int, VData}()
 v_st = Dict{Int, VDataS}()
+v_da = Dict{Int, VDataA}()
+## Make a data Interpolation of the velocity data
+v_interp = Dict{Int, DI.RegularizationSmooth}()
 D = 3.5*1e-2 #cm to m diameter of the column
 A = π * D^2 / 4 # Cross-sectional area
 for i in 1:4
@@ -113,26 +127,60 @@ for i in 1:4
         ϕ = mean([tracer_params[i][1] for i in 1:3])
         αₗ = mean([tracer_params[i][2] for i in 1:3])
     end
-    
-    bool_index = (.!ismissing.(df[:, "flow_rate"])) .& (df[!,"column"] .== i)
+    bool_index = (.!ismissing.(flow_rate) .& (column .== i))
     # convert the flow rate to μL/min
-    Q = df[bool_index,"flow_rate"] ./ 3600 .* 1e-6 # convert from ml/hr to m3/s
+    Q = flow_rate[bool_index] ./ 3600 .* 1e-6 # convert from ml/hr to m3/s
     end_times = Dates.value.(Dates.Second.(end_time[bool_index] .- t0s[i])) # end times in seconds
     start_times = Dates.value.(Dates.Second.(start_time[bool_index] .- t0s[i])) # start times in seconds
+    avg_times = start_times .+ (end_times .- start_times) ./ 2
     # create a VData object and push it to the dictionary
     v = Q./(ϕ * A) # flow velocity in m/s
     v = convert.(Float64, v) # convert to Float64
+    d = 2
+    λ = 1e9
+    dense_sample_times = range(minimum(avg_times), stop=maximum(avg_times), length=500)
+    Am = DI.RegularizationSmooth(v, avg_times, d; λ=λ, alg = :fixed, extrapolation=ExtrapolationType.Constant)
+    
+    u = Am(dense_sample_times)
+    interp = Am
+
     #De = v .* αₗ # longitudinal dispersion coefficient in m2/s
     # create a QData object and push it to the vector
     v_ds[i] = VData(v, end_times)
     v_st[i] = VDataS(v, start_times)
+    v_da[i] = VDataA(v, start_times, end_times)
+    v_interp[i] = interp
 end
 
+
+# Making a Figure for plotting the flow velocity for each column
+fig_v = Figure()
+ax = Axis(fig_v[1,1], title="Flow velocity in the model",
+xlabel ="Time (d)", ylabel="Flow velocity (m/s)")
+flowt = 0:0.0001:27
+colors = [:blue, :orange, :green, :red]
+for i in 1:4
+    vds = v_da[i]
+    # Calculate the flow velocity for the given time points
+    flowv = [v_interp[i](t*24*60*60) for t in flowt]
+    # Create a line plot for the flow velocity
+    lines!(ax, flowt, flowv, label="Column $i", color=colors[i],
+    linewidth=2)
+    # Check the data points
+    avg_times = vds.start_times .+ (vds.end_times .- vds.start_times) ./ 2
+    scatter!(ax, avg_times ./ 86400, vds.v, color   = colors[i], label="Data $i", markersize=10)
+end
+axislegend(ax, position = :lt, framevisible = false)
+resize_to_layout!(fig_v)
+fig_v
+save("plots/flow_velocity_model_m2.png", fig_v)
 
 ## Events:
 # Moment when we switch to 1.5 mM inflow concentration
 t_switch_1_5mM = DateTime(2025, 10, 06, 17, 10)
 c_no3_1_5mM = 1.5
+t_switch_1mM = DateTime(2025, 10, 12, 20, 35)
+c_no3_1mM = 1.0
 
 c_ins = Dict{Int64, CinData}()
 for i in 1:4
@@ -144,9 +192,13 @@ for i in 1:4
     cins = [[c_no3, 1e-16, c_so4, c_fe, c_doc, c_no3],]
     t0switch = []
     t_1 = Dates.value(Dates.Second(t_switch_1_5mM - t0s[i])) # convert days to seconds
-    t_1 += dv_t0[i]*1e-6 / disch_function(t_1, disch_ds[i].Q, disch_ds[i].end_times) # convert days to seconds
+    #t_1 += dv_t0[i]*1e-6 / disch_function(t_1, disch_ds[i].Q, disch_ds[i].end_times) # convert days to seconds
     push!(cins, [c_no3_1_5mM*1e-3, 1e-16, c_so4, c_fe, c_doc, c_no3_1_5mM*1e-3])
     push!(t0switch, t_1) # convert days to seconds
+    cins = vcat(cins, [[c_no3_1mM*1e-3, 1e-16, c_so4, c_fe, c_doc, c_no3_1mM*1e-3],])
+    t_2 = Dates.value(Dates.Second(t_switch_1mM - t0s[i])) # convert days to seconds
+    t_2 += dv_t0[i]*1e-6 / disch_function(t_2, disch_ds[i].Q, disch_ds[i].end_times) # convert days to seconds
+    push!(t0switch, t_2) # convert days to seconds
     t0switch = convert.(Float64, t0switch) # convert to seconds
     # Add the initial concentration at t0
     c_ins[i] = CinData(cins, t0switch)

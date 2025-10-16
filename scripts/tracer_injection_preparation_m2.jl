@@ -7,7 +7,7 @@ using Dates
 
 # load analytical data
 file_path = datadir("exp_raw", "ssexp_data.xlsx")
-sheet_name = "bromide_curve"
+sheet_name = "bromide_curve_v2"
 data = XLSX.readtable(file_path, sheet_name)
 df = DataFrame(data)
 # start-time and end-time columns are of type Any because some of the values are in DateTiem and some in Time.
@@ -96,17 +96,6 @@ Br_dict = Dict(1 => Br[column .== 1],
           3 => Br[column .== 3],
           #4 => Br[column .== 4],
           )
-# Now fix the is missing values in Br (check the missing value in each column and fix also the avg time dict)
-Br_ = Dict{Int64, Vector{Float64}}(1 => Br_dict[1][.!ismissing.(Br_dict[1])],
-          2 => Br_dict[2][.!ismissing.(Br_dict[2])],
-          3 => Br_dict[3][.!ismissing.(Br_dict[3])],
-          #4 => Br_dict[4][.!ismissing.(Br_dict[4])],
-          )
-avg_time = Dict(1 => avg_times_dict[1][.!ismissing.(Br_dict[1])],
-          2 => avg_times_dict[2][.!ismissing.(Br_dict[2])],
-          3 => avg_times_dict[3][.!ismissing.(Br_dict[3])],
-          #4 => avg_times_dict[4][.!ismissing.(Br_dict[4])],
-          )
 # filter Br_ and avg_time to remove missing values from avg_time as well
 avg_time = Dict(1 => avg_times_dict[1][.!ismissing.(avg_times_dict[1])],
           2 => avg_times_dict[2][.!ismissing.(avg_times_dict[2])],
@@ -120,6 +109,17 @@ Br_ = Dict(1 => Br_dict[1][.!ismissing.(avg_times_dict[1])],
           )
 # Now we have the Br and avg_time dictionaries with the missing values removed.
 # Ok now we are ready to create the datasets per column
+# Now filter empty values in Br-
+avg_time = Dict(1 => avg_times_dict[1][.!ismissing.(Br_[1])],
+          2 => avg_times_dict[2][.!ismissing.(Br_[2])],
+          3 => avg_times_dict[3][.!ismissing.(Br_[3])],
+          #4 => avg_times_dict[4][.!ismissing.(Br_[4])],
+          )
+Br_ = Dict(1 => Br_dict[1][.!ismissing.(Br_[1])],
+          2 => Br_dict[2][.!ismissing.(Br_[2])],
+          3 => Br_dict[3][.!ismissing.(Br_[3])],
+            #4 => Br_dict[4][.!ismissing.(Br_[4])],
+            )
 
 # Now we can plot the data
 fig = Figure()

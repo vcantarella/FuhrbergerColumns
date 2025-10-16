@@ -87,12 +87,10 @@ L = 0.08 #m (8 cm)  # Spatial locations
 D = 3.5*1e-2 #cm to m
 A = π * D^2 / 4 # Cross-sectional area
 x = range(0+dx/2, stop=L-dx/2, step=dx)  # Spatial locations
-t = range(0.1, stop=72000, length=100)  # Time locations
-c_in = 0.9e-3
+t = range(0.1, stop=24*3600, length=100)  # Time locations
 ϕ = 0.3
 αₗ = 8e-5
 De = 1e-9
-rhs! = create_tracer_rhs_q_callback(De, c_in, dx)
 
 # load the data and plot the results
 dic = load("data/br_breakthrough_data_m2.jld2")
@@ -130,9 +128,11 @@ for column in [1, 2, 3]
     p_tracer = [ϕ, αₗ, q[1]]
     u0 = zeros(length(x))
     du0 = copy(u0)
+    c_in = 1e-3
+    rhs! = create_tracer_rhs_q_callback(De, c_in, dx)
 
 
-    tspan = (0.0, maximum(end_times))
+    tspan = (0.0, 24*3600) # 1 day in seconds
     function switch_callback_condition!(out, u, t, integrator, end_times)
         for i in eachindex(end_times)
             if i == 1

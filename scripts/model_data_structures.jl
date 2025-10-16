@@ -27,6 +27,16 @@ struct VDataS{QT, T}
 end
 
 """
+    VDataA{QT, T}
+Data structure to hold the flow velocity data and corresponding start and end times.
+"""
+struct VDataA{QT, T}
+    v::QT # flow velocity in m/s
+    start_times::T
+    end_times::T
+end
+
+"""
     CinData{QT, T}
 Data structure to hold inflow concentration and time.
 This structure holds the inflow concentration data and the corresponding time.
@@ -59,6 +69,21 @@ struct ds{I, D}
     no2::D
     so4::D
     fe::D
+    pH::D
+    ec::D
+end
+
+"""
+    ds{I, D}
+Data structure to hold the dataset for each column.
+This structure holds the column index and the concentration datasets for:
+    NO3, NO2, SO4, pH, and EC.
+"""
+struct ds_m2{I, D}
+    column::I
+    no3::D
+    #no2::D
+    #so4::D
     pH::D
     ec::D
 end

@@ -82,8 +82,11 @@ This structure holds the column index and the concentration datasets for:
 struct ds_m2{I, D}
     column::I
     no3::D
-    #no2::D
-    #so4::D
-    pH::D
-    ec::D
+    #no3_std::D
+    doc::D
+    dic::D
+    no2::D
+    so4::D
+    #pH::D
+    #ec::D
 end

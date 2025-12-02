@@ -119,6 +119,7 @@ for i in 1:4
     df_cc = df_cp[df_cp[!, "column"] .== i, :]
     dic = df_cc[!, "DIC"]./12e-3
     doc = df_cc[!, "DOC"]./12e-3
+    println("Column $i mean DOC: ", mean(doc))
     t_c = df_cc[!, "t (unadjusted) [days]"]
     lines!(ax6, t_c, doc, label = col_label, color = colors[i])
     scatter!(ax6, t_c, doc, label = col_label, color = colors[i])

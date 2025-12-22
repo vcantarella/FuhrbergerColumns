@@ -5,7 +5,10 @@ using SparseConnectivityTracer
 using Symbolics
 using LinearSolve
 using SciMLSensitivity
-using FiniteDiff
+# using FiniteDiff
+# using DiffEqBayes
+# using Turing
+# using Distributions
 include("model_monod.jl")
 
 
@@ -50,7 +53,7 @@ cbs = ODE.DiscreteCallback[]
 for i in 1:length(ts)
     t_switch = ts[i]
     condition(u, t, integrator) = t == t_switch
-    affect!(integrator) = integrator.u[1,1] = cs[i]
+    affect!(integrator) = integrator.u[1,1] = convert(eltype(integrator.u),cs[i])
     push!(cbs, ODE.DiscreteCallback(condition, affect!))
 end
 cbset = ODE.CallbackSet(cbs...)
@@ -72,11 +75,11 @@ fastprob_zero = ODE.ODEProblem(fixed_rhs_zero!, u0_0, tspan, p0)
 
 # defining points to stop
 tstops = ts # a copy
-sol_monod = ODE.solve(fastprob_monod, ODE.QNDF(linsolve = KLUFactorization()), abstol = 1e-8, reltol = 1e-8,
+sol_monod = ODE.solve(fastprob_monod, ODE.FBDF(linsolve = KLUFactorization()), abstol = 1e-8, reltol = 1e-8,
     callback = cbset,
     tstops = tstops,
     )
-sol_zero = ODE.solve(fastprob_zero, ODE.QNDF(linsolve = KLUFactorization()), abstol = 1e-8, reltol = 1e-8,
+sol_zero = ODE.solve(fastprob_zero, ODE.FBDF(linsolve = KLUFactorization()), abstol = 1e-8, reltol = 1e-8,
     callback = cbset,
     tstops = tstops,
     )
@@ -100,38 +103,75 @@ Legend(fig[2, :], axn, framevisible=false, merge=true, orientation = :horizontal
 fig
 
 data_points_t = collect(4:27) .* 86400
-data_points_no3 = [sol_monod(t)[end, 1] for t in data_points_t]
+data_points_no3 = [sol_zero(t)[end, 1] for t in data_points_t]
 
-function f(p)
-    u0_monod = zeros(eltype(p),length(x)+1, 2) # 5 mobile components + 2 immobile components (active and inactive biomass)
-    u0_monod[:,2] .= p[6]
-    c_in = [2e-3, 0]
-    u0_monod[1, :] .= c_in #initial inflow concentration 2 mM NO3-
-    fprob = remake(fastprob_monod, u0 = u0_monod, p = p)
-    sol_monod = ODE.solve(fprob, ODE.QNDF(linsolve = KLUFactorization()), abstol = 1e-8, reltol = 1e-8,
-    callback = cbset,
-    #tstops = tstops,
-    saveat = data_points_t,
+
+sol = ODE.solve(fastprob_monod, ODE.QNDF(linsolve = KLUFactorization()), abstol = 1e-8, reltol = 1e-8,
+        callback = cbset,
+        saveat = data_points_t,
+        tstops = tstops,
+        sensealg = ForwardDiffSensitivity(;convert_tspan = true)
     )
-    no3_results = zeros(eltype(p), length(data_points_t))
-    for i in eachindex(data_points_t)
-        ind = findfirst(sol_monod.t .== data_points_t[i])
-        no3_results[i] = sol_monod.u[ind][end, 1]
+# find the idexes in sol.t that match data_points_t
+index = [findfirst(t .== sol.t) for t in data_points_t]
+
+
+function monod_prediction_model(p_log)
+    # p_log contains log-transformed parameters: 5 for monod, 1 for initial biomass
+    p_fit = exp.(p_log[1:5])
+    b0_fit = exp(p_log[6])
+
+    # Set up initial conditions with the new biomass value
+    u0_fit = zeros(eltype(b0_fit), length(x)+1, 2)
+    u0_fit[:,2] .= b0_fit
+    u0_fit[1, :] .= [2e-3, 0] # initial inflow concentration
+
+    # Remake and solve the problem
+    fprob = remake(fastprob_monod, p = p_fit, u0 = u0_fit)
+    sol = ODE.solve(fprob, ODE.QNDF(linsolve = KLUFactorization()), abstol = 1e-8, reltol = 1e-8,
+        callback = cbset,
+        saveat = data_points_t,
+        tstops = tstops,
+        sensealg = ForwardDiffSensitivity(;convert_tspan = true)
+    )
+
+    # Handle solver failures
+    if sol.retcode != :Success
+        return fill(Inf, length(data_points_t)) # Return infinite error if solve fails
     end
-    residuals = data_points_no3 .- no3_results
-    return residuals
+
+    predicted_no3 = [u[end, 1] for u in sol.u[index]]
+    return predicted_no3 .- data_points_no3
 end
 
-# Define the jacobian via finite differences
-jac(p) = FiniteDiff.finite_difference_jacobian(f, p)
+using ForwardDiff
+# calculate the jacobian with ForwardDiff
 
-p = vcat(p_monod,[1e-5])
+# direct adjoint calculation investigation:
+# discrete adjoint gradient:
+function dg(out, u, p, t, i)
+    out .= -data_points_no3[i]+u[end, 1]
+end 
+sol = ODE.solve(fastprob_monod, ODE.QNDF(linsolve = KLUFactorization()), abstol = 1e-8, reltol = 1e-8,
+        callback = cbset,
+        tstops = tstops,
+    )
+res = adjoint_sensitivities(sol, ODE.Vern9(), t = data_points_t,
+    dgdu_discrete = dg, abstol = 1e-8,
+    reltol = 1e-8,
+    sensealg = GaussAdjoint(checkpointing=true),
+    )
 
-f(p)
-jac(p)
+# Run the optimization
+p_initial = vcat(p_monod, [1e-5]) # Add initial guess for biomass
+p_log_initial = log.(p_initial)
 
-f_log_p(p) = f(exp.(p))
-jac_log_p(p) = FiniteDiff.finite_difference_jacobian(f_log_p, p)
+jac(p) = ForwardDiff.jacobian((p_log) -> monod_prediction_model(p_log), p)
+using nonlinearlstr
 
-f_log_p(log.(p))
-jac_log_p(log.(p))
+fit = nonlinearlstr.lm_trust_region(monod_prediction_model, jac, p_log_initial)
+
+p_fit_log = fit[1]
+p_fit_final = exp.(p_fit_log)
+
+println("Fitted Monod parameters: ", p_fit_final)

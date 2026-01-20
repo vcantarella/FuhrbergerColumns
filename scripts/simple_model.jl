@@ -19,10 +19,10 @@ tracer_params[4] = [mean([tracer_params[k][1] for k in 1:3]),
                     mean([tracer_params[k][2] for k in 1:3])] # use the average porosity of columns 1 and 2 for column 4
 # Load the prepared data
 function prepare_data()
-    return v_interp, c_ins, all_ds
+    return v_interp, c_ins, all_ds, q_disch, v_da
 end
 
-v_interp, c_ins, all_ds = prepare_data()
+v_interp, c_ins, all_ds, q_disch, v_da = prepare_data()
 # Diffusion coefficients for the different (mobile) components
 Deff = @SVector [
     1.0e-9, # NO3-
@@ -98,28 +98,50 @@ dx = 0.0001 # Spatial step size
 L = 0.08 #m (8 cm)  # Spatial locations
 fig_height = 300*3
 fig = Figure(size = (1000, fig_height))
-axn = Axis(fig[1:2, 1], title = "Nitrate Outflows",
+axn = Axis(fig[1:2, 1], title = "a. Nitrate",
     xlabel = "Time (days)", ylabel = "(NO₃⁻) [mmol L⁻¹]",
     yticks = 0:5e-1:2.1,
     xticks = 5:5:28
     )
-axdoc = Axis(fig[1, 2], title = "DOC Outflows",
+axdoc = Axis(fig[1, 2], title = "b. DOC",
     xlabel = "Time (days)", ylabel = "DOC [mmol L⁻¹]",
     #yticks = 0:50:300
     )
-axdic = Axis(fig[2, 2], title = "DIC Outflows",
+axdic = Axis(fig[2, 2], title = "c. DIC",
     xlabel = "Time (days)", ylabel = "DIC [mmol L⁻¹]",
     #yticks = 0:50:300
     )
-axso4 = Axis(fig[3, 2], title = "Sulfate Outflows",
+axso4 = Axis(fig[3, 2], title = "e. Sulfate",
     xlabel = "Time (days)", ylabel = "(SO₄²⁻) [mmol L⁻¹]",
     #yticks = 0:2e-1:1.1
     )
-axno2 = Axis(fig[3, 1], title = "Nitrite Outflows",
+axno2 = Axis(fig[3, 1], title = "d. Nitrite",
     xlabel = "Time (days)", ylabel = "(NO₂⁻) [mmol L⁻¹]",
     #yticks = 0:2e-1:1.1
     )
 
+fig2 = Figure(size = (800, 300))
+axn2 = Axis(fig2[1, 2], title = "b. Model nitrate outflow",
+    xlabel = "Time (days)", ylabel = "(NO₃⁻) [mmol L⁻¹]",
+    yticks = 0:5e-1:2.1,
+    xticks = 5:5:28,
+    xgridvisible = false,
+    ygridvisible = false,
+    )
+axv2 = Axis(fig2[1, 1], title = "a. Flow velocity",
+    xlabel = "Time (days)", ylabel = "Velocity [m day⁻¹]",
+    xticks = 5:5:28,
+    xgridvisible = false,
+    ygridvisible = false,
+    )
+axq2 = Axis(fig2[1, 1],
+    ylabel = "Flow rate [mL hr⁻¹]",
+    yaxisposition = :right,
+    xgridvisible = false,
+    ygridvisible = false,
+    )
+hidespines!(axq2)
+hidexdecorations!(axq2)
 colors = [:blue, :orange, :green, :red]
 for c in 1:4
 # Starting the model for column 1
@@ -192,6 +214,11 @@ no3 = col1.no3
 #no3_std = col1.no3_std
 
 # Plot results
+if c == 4
+    label = "Column $c (control)"
+else
+    label = "Column $c"
+end
 
 
 # axf = Axis(fig[2, 1],
@@ -201,25 +228,35 @@ no3 = col1.no3
 #     yticks = 1e-3:5e-4:3e-3)
 # ylims!(axs, 9e-4, 3e-3)
 plot_t = sol.t ./ (24*60*60) # convert seconds to days
-lines!(axn, plot_t, no3_out*1e3, label = "Column $c", color = colors[c])
+lines!(axn2, plot_t, no3_out*1e3, label = label, color = colors[c])
+
+plot_flowt = 0:0.0001:27
+avg_times = v_da[c].end_times .- diff([0.0; v_da[c].start_times])./2
+v_c = v_da[c].v
+q_c = q_disch[c].(avg_times)
+v_plot = [v_interp[c](t*24*60*60) * 24*60*60 for t in plot_flowt]
+lines!(axv2, plot_flowt, v_plot, label = label, color = colors[c])
+scatter!(axv2, avg_times ./ (24*60*60), v_c .* (24*60*60), label = label, color = colors[c], markersize = 8)
+scatter!(axq2, avg_times ./ (24*60*60), q_c .* (1e6*3600), label = label, color = colors[c], markersize = 8)
 # lines!(axs, plot_t, tracer_out, label = "NO3- tracer outflow", color = :blue, linestyle = :dash)
 # lines!(axn, plot_t, no2_out, label = "NO2- outflow", color = :orange)
 # lines!(axs, plot_t, so4_out, label = "SO4-2 outflow", color = :green)
 # lines!(axf, plot_t, fe_out, label = "Fe+2 outflow", color = :purple)
 # lines!(ax, plot_t, lac_out, label = "Lactate outflow", color = :red)
 # scatter!(axn, no2.t ./ (24*60*60), no2.conc*1e-6, label = "Measured NO2- outflow", color = :orange, markersize = 8)
-scatter!(axn, no3.t ./ (24*60*60), no3.conc, label = "Column $c", color = colors[c], markersize = 8)
+scatter!(axn, no3.t ./ (24*60*60), no3.conc, label = label, color = colors[c], markersize = 8)
+scatter!(axn2, no3.t ./ (24*60*60), no3.conc, label = label, color = colors[c], markersize = 8)
 #errorbars!(axn, no3.t ./ (24*60*60), no3.conc/14, no3_std.conc ./14; color = colors[c])
 # scatter!(axs, so4.t ./ (24*60*60), so4.conc*1e-6, label = "Measured SO4-2 outflow", color = :green, markersize = 8)
 # scatter!(axf, fe.t ./ (24*60*60), fe.conc*1e-6, label = "Measured Fe outflow", color = :purple, markersize = 8)
-scatter!(axdoc, col1.doc.t ./ (24*60*60), col1.doc.conc, label = "Column $c", color = colors[c], markersize = 8)
-lines!(axdoc, col1.doc.t ./ (24*60*60), col1.doc.conc, label = "Column $c", color = colors[c], linestyle = :dash)
-scatter!(axdic, col1.dic.t ./ (24*60*60), col1.dic.conc, label = "Column $c", color = colors[c], markersize = 8)
-lines!(axdic, col1.dic.t ./ (24*60*60), col1.dic.conc, label = "Column $c", color = colors[c], linestyle = :dash)
-scatter!(axso4, col1.so4.t ./ (24*60*60), col1.so4.conc, label = "Column $c", color = colors[c], markersize = 8)
-lines!(axso4, col1.so4.t ./ (24*60*60), col1.so4.conc, label = "Column $c", color = colors[c], linestyle = :dash)
-scatter!(axno2, col1.no2.t ./ (24*60*60), col1.no2.conc, label = "Column $c", color = colors[c], markersize = 8)
-lines!(axno2, col1.no2.t ./ (24*60*60), col1.no2.conc, label = "Column $c", color = colors[c], linestyle = :dash)
+scatter!(axdoc, col1.doc.t ./ (24*60*60), col1.doc.conc, label = label, color = colors[c], markersize = 8)
+lines!(axdoc, col1.doc.t ./ (24*60*60), col1.doc.conc, label = label, color = colors[c], linestyle = :dash)
+scatter!(axdic, col1.dic.t ./ (24*60*60), col1.dic.conc, label = label, color = colors[c], markersize = 8)
+lines!(axdic, col1.dic.t ./ (24*60*60), col1.dic.conc, label = label, color = colors[c], linestyle = :dash)
+scatter!(axso4, col1.so4.t ./ (24*60*60), col1.so4.conc, label = label, color = colors[c], markersize = 8)
+lines!(axso4, col1.so4.t ./ (24*60*60), col1.so4.conc, label = label, color = colors[c], linestyle = :dash)
+scatter!(axno2, col1.no2.t ./ (24*60*60), col1.no2.conc, label = label, color = colors[c], markersize = 8)
+lines!(axno2, col1.no2.t ./ (24*60*60), col1.no2.conc, label = label, color = colors[c], linestyle = :dash)
 end
 fig
 # Plot the inflow concentration in time
@@ -237,6 +274,19 @@ for t in plot_t
     push!(c_in_plot, c_in_loc)
 end
 lines!(axn, plot_t, c_in_plot, label = "Inflow concentration", color = :black, linestyle = :dash)
+lines!(axn, plot_t, c_in_plot.-1, label = "Inflow concentration - 1 mM",
+    color = :gray, linestyle = :dot, linewidth = 2)
+# add some vertical lines to indicate the -1 mM shifts
+idx = 1
+for t_shift in [6.0, 16.0, 22.0, 26.0]
+    lines!(axn, [t_shift, t_shift], [c_indata.c_in[idx+1][1]*1e3-1, c_indata.c_in[idx+1][1]*1e3],
+        color = :gray, linestyle = :dot, linewidth = 2)
+    # add a text next to the line
+    text!(axn, t_shift, c_indata.c_in[idx+1][1]*1e3-1+0.3, text = "-1 mM", align = (:left, :bottom),
+        fontsize = 12, rotation = π/2)
+    global idx += 1
+end
+
 # inflow concentration for the remaining plots
 lines!(axdoc, plot_t, zeros(length(plot_t)), label = "Inflow concentration", color = :black, linestyle = :dash)
 lines!(axdic, plot_t, ones(length(plot_t)).*30/12, label = "Inflow concentration", color = :black, linestyle = :dash)
@@ -264,3 +314,9 @@ Legend(fig[4, :], axn, framevisible=false, merge=true, orientation = :horizontal
 resize_to_layout!(fig)
 fig
 save("outflow_concentrations_m2.png", fig, px_per_unit = 2.0)
+
+linkxaxes!(axv2, axq2)
+Legend(fig2[2, :], axn2, framevisible=false, merge=true, orientation = :horizontal)
+resize_to_layout!(fig2)
+fig2
+save("model_flow_velocity_m2.png", fig2, px_per_unit = 2.0)

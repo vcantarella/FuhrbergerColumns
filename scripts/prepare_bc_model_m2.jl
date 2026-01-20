@@ -128,7 +128,8 @@ v_ds = Dict{Int, VData}()
 v_st = Dict{Int, VDataS}()
 v_da = Dict{Int, VDataA}()
 ## Make a data Interpolation of the velocity data
-v_interp = Dict{Int, DI.LinearInterpolation}()
+v_interp = Dict{Int, Function}()
+q_disch = Dict{Int, Function}()
 D = 3.5*1e-2 #cm to m diameter of the column
 A = π * D^2 / 4 # Cross-sectional area
 for i in 1:4
@@ -153,7 +154,16 @@ for i in 1:4
     λ = 1e9
     dense_sample_times = range(minimum(avg_times), stop=maximum(avg_times), length=500)
     Am = DI.LinearInterpolation(v, avg_times; extrapolation=DI.ExtrapolationType.Constant)
-    
+    function v_func(t)
+        @inbounds for i in eachindex(v)
+            if t <= end_times[i]
+                return v[i]   # This should be inside the if block
+            end
+        end
+        return v[end]
+    end
+    q_disch[i] = t -> disch_function(t, Q, end_times)
+
     u = Am(dense_sample_times)
     interp = Am
 
@@ -162,7 +172,7 @@ for i in 1:4
     v_ds[i] = VData(v, end_times)
     v_st[i] = VDataS(v, start_times)
     v_da[i] = VDataA(v, start_times, end_times)
-    v_interp[i] = interp
+    v_interp[i] = v_func
 end
 
 @save "data/flow_velocity_data_model_m2.jld2" v_da
@@ -206,30 +216,31 @@ c_no3_1_5mM = 94.31/62 # in mM
 # BCK 5: from 12.10 onwards (1 mM + NaBr tracer)
 t_switch_1mM = DateTime(2025, 10, 12, 20, 35)
 c_no3_1mM = (63.16 + 63.52)/2/62 # in mM
+c_dic = 30/12*1e-3 # concentration of DIC in the input solution [M]
 
 c_ins = Dict{Int64, CinData}()
 for i in 1:4
     if i < 4
-    c_no3 = c_no3_bck1*1e-3 # concentration of NO3- in the input solution [mM]
-    c_doc = 0.0
-    c_so4 = 0e-3 # concentration of SO4-2 in the input solution [mM]
-    c_fe = 0.0e-3 # concentration of Fe+2 in the input solution [mM]
+    c_no3 = c_no3_bck1*1e-3 # concentration of NO3- in the input solution [M]
+    c_doc = 0.0 # DOC concentration in the input solution [M]
+    c_so4 = 0e-3 # concentration of SO4-2 in the input solution [M]
+    c_fe = 0.0e-3 # concentration of Fe+2 in the input solution [M]
 
-    cins = [[c_no3, 1e-16, c_so4, c_fe, c_doc, c_no3],]
+    cins = [[c_no3, 1e-16, c_so4, c_fe, c_doc, c_no3, c_dic],]
     t0switch = []
     t_1 = Dates.value(Dates.Second(t_switch_bck2 - t0s[i])) # convert days to seconds
     t_1 += dv_t0[i]*1e-6 / disch_function(t_1, disch_ds[i].Q, disch_ds[i].end_times) # convert days to seconds
     push!(t0switch, t_1) # convert days to seconds
-    cins = vcat(cins, [[c_no3_bck2*1e-3, 1e-16, c_so4, c_fe, c_doc, c_no3_bck2*1e-3],])
+    cins = vcat(cins, [[c_no3_bck2*1e-3, 1e-16, c_so4, c_fe, c_doc, c_no3_bck2*1e-3, c_dic],])
     t_2 = Dates.value(Dates.Second(t_switch_bck3 - t0s[i])) # convert days to seconds
     t_2 += dv_t0[i]*1e-6 / disch_function(t_2, disch_ds[i].Q, disch_ds[i].end_times) # convert days to seconds
     push!(t0switch, t_2) # convert days to seconds
-    cins = vcat(cins, [[c_no3_bck3*1e-3, 1e-16, c_so4, c_fe, c_doc, c_no3_bck3*1e-3],])
+    cins = vcat(cins, [[c_no3_bck3*1e-3, 1e-16, c_so4, c_fe, c_doc, c_no3_bck3*1e-3, c_dic],])
     t_3 = Dates.value(Dates.Second(t_switch_1_5mM - t0s[i])) # convert days to seconds
     t_3 += dv_t0[i]*1e-6 / disch_function(t_3, disch_ds[i].Q, disch_ds[i].end_times) # convert days to seconds
-    push!(cins, [c_no3_1_5mM*1e-3, 1e-16, c_so4, c_fe, c_doc, c_no3_1_5mM*1e-3])
+    push!(cins, [c_no3_1_5mM*1e-3, 1e-16, c_so4, c_fe, c_doc, c_no3_1_5mM*1e-3, c_dic])
     push!(t0switch, t_3) # convert days to seconds
-    cins = vcat(cins, [[c_no3_1mM*1e-3, 1e-16, c_so4, c_fe, c_doc, c_no3_1mM*1e-3],])
+    cins = vcat(cins, [[c_no3_1mM*1e-3, 1e-16, c_so4, c_fe, c_doc, c_no3_1mM*1e-3, c_dic],])
     t_4 = Dates.value(Dates.Second(t_switch_1mM - t0s[i])) # convert days to seconds
     t_4 += dv_t0[i]*1e-6 / disch_function(t_4, disch_ds[i].Q, disch_ds[i].end_times) # convert days to seconds
     push!(t0switch, t_4) # convert days to seconds
@@ -241,7 +252,7 @@ for i in 1:4
         c_doc = 0.0
         c_so4 = 0e-3 # concentration of SO4-2 in the input solution [mM]
         c_fe = 0.0e-3 # concentration of Fe+2 in the input solution [mM]
-        cins = [[0.0, 0.0, c_so4, c_fe, c_doc, c_no3],]
+        cins = [[0.0, 0.0, c_so4, c_fe, c_doc, c_no3, c_dic],]
         t0switch = []
         c_ins[i] = CinData(cins, t0switch)
     end

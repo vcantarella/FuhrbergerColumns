@@ -17,6 +17,9 @@ using DrWatson
 using CairoMakie
 using DataInterpolations
 using QuadGK
+using Statistics
+using CSV
+using DataFrames
 
 # --- Configuration & Data Loading ---
 
@@ -113,21 +116,30 @@ end
 
 # Plot settings
 colors = [:blue, :orange, :green, :red]
-fig_height = 300 * 3
-fig = Figure(size = (1000, fig_height))
 
-# Axis for Nitrate Output
-axn = Axis(fig[1:2, 1], 
+# Figure 1: Nitrate Output and Reaction Rates
+fig_conc = Figure(size = (500, 500))
+axn = Axis(fig_conc[1, 1], 
     title = "a. Nitrate Outflows",
     titlealign = :left,
     ylabel = "NO₃⁻ [mmol L⁻¹]",
-    yticks = 0:5e-1:2.1,
+    yticks = 0:0.5:2.5,
     xticks = 5:5:28
 )
+axr = Axis(fig_conc[2, 1],
+    title = "b. Estimated Reaction Rates",
+    titlealign = :left,
+    ylabel = "Rate [mmol L⁻¹ day⁻¹]",
+    xlabel = "Time [days]",
+    xticks = 5:5:28,
+    limits = (3,27,1,4.3)
+)
+linkxaxes!(axn, axr)
 
-# Axis for Velocity
-axq = Axis(fig[3,1], 
-    title = "b. Velocity",
+# Figure 2: Velocity
+fig_vel = Figure(size = (700, 400))
+axq = Axis(fig_vel[1,1], 
+    title = "Velocity",
     titlealign= :left,
     xlabel = "Time [days]", 
     ylabel = "v [m s⁻¹]",
@@ -137,13 +149,8 @@ axq = Axis(fig[3,1],
 # Column length (m)
 const L_COLUMN = 0.08 
 
-# Reaction rates (approximate zero-order rates for each column)
-# These values seem to be fitted or estimated previously.
-reaction_rates = Dict(
-    1 => -2.7e-8,
-    2 => -3.3e-8,
-    3 => -3.2e-8
-)
+# Store calculated rates for comparison table
+model_rates_collection = []
 
 # Loop over columns 1 to 3
 for c in 1:3
@@ -154,8 +161,6 @@ for c in 1:3
     # 2. Lagrangian Trajectory Calculation
     # X(t) represents the position of a fluid parcel that entered at t=0? 
     # Actually, X(t) here is defined as integral of v from 0 to t.
-    # This represents the total distance traveled by a parcel introduced at t=0 by time t.
-    # Or more accurately, it's the cumulative displacement field.
     X(t) = quadgk(v_inst, 0, t)[1]
 
     # Pre-calculate X(t) for interpolation to speed up inverse lookup
@@ -163,56 +168,96 @@ for c in 1:3
     dense_t = 1:(3*3600):(27*24*60*60) # Every 3 hours
     dense_x = [X(t) for t in dense_t]
     
-    # T(x) is the inverse function: given a distance x, when does the "cumulative flow" reach it?
-    # This allows us to find when a parcel reaching L at time t must have entered.
-    # Wait, the residence time logic below is: τ(t) = t - T(X(t) - L)
-    # X(t) is total distance "flow" has moved since t=0.
-    # X(t) - L is the "position" in the cumulative flow frame that is L meters behind the current front.
-    # T(X(t) - L) gives the time t_in when the cumulative flow was X(t) - L.
-    # So a parcel entering at t_in is now at X(t) - X(t_in) = L. Correct.
     T_interp = DataInterpolations.LinearInterpolation(dense_t, dense_x)
 
     # Calculate minimum time before any fluid could have exited (plug flow)
     mint = T_interp(L_COLUMN) 
 
     # Residence time function τ(t)
-    # t is the current time (observation time at outlet)
-    # t_in = T_interp(X(t) - L) is the time the parcel currently at outlet entered the column.
     τ(t) = t - T_interp(X(t) - L_COLUMN)
 
-    # 3. Calculate Model Output
-    r0 = reaction_rates[c]
-    
-    # Define points to evaluate (only after breakthrough)
-    analysis_t = dense_t[dense_t .> mint]
-    
-    # Calculate concentrations
-    c_out_values = [calculate_concentration_out(t, c_in, τ, r0) for t in analysis_t]
-    
-    # 4. Plotting
-    # Experimental Data
+    # 3. Estimate Reaction Rate from Data
     col_data = experimental_data[c]
     no3_exp = col_data.no3
+    
+    # Filter data points that occur after breakthrough (t > mint)
+    valid_indices = findall(t -> t > mint, no3_exp.t)
+    valid_t = no3_exp.t[valid_indices]
+    valid_conc_exp = no3_exp.conc[valid_indices] .* 1e-3 # Convert mmol/L to mol/L for calculation
+
+    calculated_rates = Float64[]
+    for i in eachindex(valid_t)
+        t_val = valid_t[i]
+        tau_val = τ(t_val)
+        c_in_val = c_in(t_val - tau_val)
+        c_out_val = valid_conc_exp[i]
+        
+        # Rate = (C_out - C_in) / tau
+        # Rate is in mol/L/s
+        r_val = (c_out_val - c_in_val) / tau_val
+        push!(calculated_rates, r_val)
+    end
+    
+    mean_rate = isempty(calculated_rates) ? 0.0 : mean(calculated_rates)
+    println("Column $c: Mean Rate = $mean_rate mol/L/s")
+
+    # Calculate rate in mol per kg of sand
+    # Formula: r_sand = (r_pw * phi) / ((1 - phi) * rho_grain)
+    # phi = tracer_params[c][1]
+    # rho_grain = 2.65 kg/L
+    phi = tracer_params[c][1]
+    rho_grain = 2.65
+    mean_rate_sand = (-mean_rate * phi * 86400) / ((1 - phi) * rho_grain)
+    println("Column $c: Mean Rate = $mean_rate_sand mol/kg_sand/day")
+    
+    push!(model_rates_collection, (c, -mean_rate, mean_rate_sand))
+
+    # 4. Calculate Model Output with MEAN rate
+    analysis_t = dense_t[dense_t .> mint]
+    c_out_values = [calculate_concentration_out(t, c_in, τ, mean_rate) for t in analysis_t]
+    
+    # 5. Plotting
+    
+    # Concentrations
     scatter!(axn, no3_exp.t ./ (24*60*60), no3_exp.conc, 
         label = "Column $c", color = colors[c], markersize = 8)
 
-    # Model Output
     plot_t = collect(analysis_t) ./ (3600*24) # Convert to days
-    lines!(axn, plot_t, c_out_values .* 1e3, # Convert to mmol/L or relevant scale? Result in to be mol/L.
-        label = "Column $c", color = colors[c]) # Code had *1e3, assuming plot wants µM? 
+    lines!(axn, plot_t, c_out_values .* 1e3, # Convert to mmol/L for plot
+        label = "Column $c (Model)", color = colors[c]) 
+        
     if c == 3
         lines!(axn, collect(analysis_t)./(3600*24), c_in.(analysis_t) .* 1e3, 
-            linestyle = :dash, label = "Inflow concentration", color = :black)
+            linestyle = :dash, label = "Inflow\n concentration", color = :black)
     end
+
+    # Reaction Rates
+    # Convert mol/L/s to mmol/L/day: * 1e3 * 86400
+    conv_factor = 1e3 * 86400
+    scatter!(axr, valid_t ./ (24*60*60), -calculated_rates .* conv_factor, 
+        color = colors[c], markersize = 8, label = "Calc. Rate Col $c")
+    lines!(axr, valid_t ./ (24*60*60), -calculated_rates .* conv_factor, 
+        color = colors[c], label = "Calc. Rate Col $c")    
+    hlines!(axr, [-mean_rate * conv_factor], color = colors[c], linestyle = :dash, label = "Mean Rate Col $c")
 
     # Velocity Plot
     v_plot = v_inst.(analysis_t)
-    lines!(axq, plot_t, v_plot, color = colors[c])
+    lines!(axq, plot_t, v_plot, color = colors[c], label = "Column $c")
 end
 
-# Finalize Plot
-linkxaxes!(axn, axq)
-Legend(fig[4,1], axn, framevisible = false, merge = true, orientation = :horizontal)
+# Finalize Plots
 
-fig
-save(plotsdir("zero_order_fit.png"), fig)
+Legend(fig_conc[3,1], axn, framevisible = false,
+    nbanks=2, merge = true, orientation = :horizontal, labelsize = 10)
+
+save(plotsdir("nitrate_and_rates.png"), fig_conc)
+save(plotsdir("velocity_separate.png"), fig_vel)
+
+# export the rates data
+df_export = DataFrame(
+    column = [data[1] for data in model_rates_collection],
+    rate_mol_L_s = [data[2] for data in model_rates_collection],
+    rate_mol_kg_d = [data[3] for data in model_rates_collection],
+)
+
+CSV.write("data/no3_rates.csv", df_export)

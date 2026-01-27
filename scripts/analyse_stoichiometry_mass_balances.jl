@@ -103,12 +103,20 @@ for c in 1:4
         last_t = times[end-2:end]
         last_c = concs[end-2:end]
         
-        avg_c = mean(last_c)
-        std_c = std(last_c)
-        avg_t = mean(last_t)
+        # Use Median and corresponding time
+        # Create pairs to keep time associated with concentration
+        pairs = collect(zip(last_c, last_t))
+        # Sort by concentration
+        sorted_pairs = sort(pairs, by = first)
         
-        # Residence Time
-        dist_at_t = X(avg_t)
+        # Median index (for 3 points, it's 2)
+        mid_idx = div(length(sorted_pairs) + 1, 2)
+        med_c, med_t = sorted_pairs[mid_idx]
+        
+        std_c = std(last_c)
+        
+        # Residence Time using time of median concentration
+        dist_at_t = X(med_t)
         target_x = dist_at_t - L_COLUMN
         
         if target_x < 0
@@ -117,7 +125,7 @@ for c in 1:4
             rate = NaN
         else
             t_in = T_interp(target_x)
-            tau = avg_t - t_in
+            tau = med_t - t_in
             
             if cin_idx != -1
                 cin_func = make_c_in_func(c_ins[c], cin_idx)
@@ -128,10 +136,10 @@ for c in 1:4
             
             # Rate Calculation: R = (C_out - C_in) / tau
             # Units: mM / d
-            rate = (avg_c - cin_val) / (tau / 86400) 
+            rate = (med_c - cin_val) / (tau / 86400) 
         end
         
-        push!(results, (c, name, avg_c, std_c, avg_t/86400, tau/86400, cin_val, rate))
+        push!(results, (c, name, med_c, std_c, med_t/86400, tau/86400, cin_val, rate))
     end
 end
 

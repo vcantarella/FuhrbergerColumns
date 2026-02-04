@@ -54,6 +54,20 @@ for row in eachrow(df_project)
     ))
 end
 
+# --- 1b. Load Project Concentrations ---
+df_soli = CSV.read("data/soliphase_results.csv", DataFrame)
+for row in eachrow(df_soli)
+    if !ismissing(row["TOC [mol/kg]"])
+        push!(conc_rows, (
+            Reference = "Current Project",
+            Zone = "Non-Sulphidic",
+            Depth_Mid = 17.5,
+            Type = "C_org",
+            Value = row["TOC [mol/kg]"]
+        ))
+    end
+end
+
 # --- 2. Load Eschenbach et al. (2015) ---
 df_esch = CSV.read("data/external/eschenbach_2013_2015.csv", DataFrame)
 col_dcum = get_col_robust(df_esch, "Dcum")

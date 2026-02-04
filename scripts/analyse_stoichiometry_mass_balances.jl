@@ -54,15 +54,13 @@ results = DataFrame(Column=Int[], Component=String[], Conc_Avg=Float64[], Conc_S
 # DOC: Index 5
 # DIC: Index 7
 components = [
-    ("NO3", 1), 
     ("DOC", 5),
     ("DIC", 7)
 ]
 
 # Mapping for all_ds fields
 get_data_field(ds, name) = 
-    if name == "NO3" ds.no3
-    elseif name == "DOC" ds.doc
+    if name == "DOC" ds.doc
     elseif name == "DIC" ds.dic
     else nothing end
 
@@ -170,6 +168,8 @@ for r in eachrow(results)
 end
 
 display(corrected_results)
+
+CSV.write("data/corr_rates_dic_doc.csv", corrected_results)
 
 println("\n--- Aggregated Corrected Rates by Species (Min, Med, Max) ---")
 summary_stats = combine(groupby(corrected_results, :Component)) do df

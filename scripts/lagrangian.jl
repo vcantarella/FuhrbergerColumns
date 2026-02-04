@@ -200,6 +200,9 @@ for c in 1:3
     
     mean_rate = isempty(calculated_rates) ? 0.0 : mean(calculated_rates)
     println("Column $c: Mean Rate = $mean_rate mol/L/s")
+    # Convert mol/L/s to mmol/L/day: * 1e3 * 86400
+    conv_factor = 1e3 * 86400
+    rate_mmol_d = -mean_rate*conv_factor
 
     # Calculate rate in mol per kg of sand
     # Formula: r_sand = (r_pw * phi) / ((1 - phi) * rho_grain)
@@ -210,7 +213,7 @@ for c in 1:3
     mean_rate_sand = (-mean_rate * phi * 86400) / ((1 - phi) * rho_grain)
     println("Column $c: Mean Rate = $mean_rate_sand mol/kg_sand/day")
     
-    push!(model_rates_collection, (c, -mean_rate, mean_rate_sand))
+    push!(model_rates_collection, (c, -mean_rate, rate_mmol_d, mean_rate_sand))
 
     # 4. Calculate Model Output with MEAN rate
     analysis_t = dense_t[dense_t .> mint]
@@ -232,8 +235,7 @@ for c in 1:3
     end
 
     # Reaction Rates
-    # Convert mol/L/s to mmol/L/day: * 1e3 * 86400
-    conv_factor = 1e3 * 86400
+    
     scatter!(axr, valid_t ./ (24*60*60), -calculated_rates .* conv_factor, 
         color = colors[c], markersize = 8, label = "Calc. Rate Col $c")
     lines!(axr, valid_t ./ (24*60*60), -calculated_rates .* conv_factor, 
@@ -257,7 +259,9 @@ save(plotsdir("velocity_separate.png"), fig_vel)
 df_export = DataFrame(
     column = [data[1] for data in model_rates_collection],
     rate_mol_L_s = [data[2] for data in model_rates_collection],
-    rate_mol_kg_d = [data[3] for data in model_rates_collection],
+    rate_mmol_L_d = [data[3] for data in model_rates_collection],
+    rate_mol_kg_d = [data[4] for data in model_rates_collection],
 )
+display(df_export)
 
 CSV.write("data/no3_rates.csv", df_export)
